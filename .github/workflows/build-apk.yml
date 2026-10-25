@@ -23,30 +23,42 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Install Capacitor dependencies
+      - name: Stage the built web bundle
+        run: |
+          set -euo pipefail
+          rm -rf cap
+          mkdir -p cap/www
+          cp index.html cap/www/
+          cp -r public/. cap/www/
+          test -f cap/www/index.html
+          test -f cap/www/manifest.json
+          test -f cap/www/service-worker.js
+          test -d cap/www/icons
+          ls cap/www/assets/index-*.js >/dev/null
+          echo "staged files: $(find cap/www -type f | wc -l)"
+
+      - name: Install Capacitor in an isolated project directory
+        working-directory: cap
         run: |
           npm init -y
-          npm i --no-audit --no-fund @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor-community/bluetooth-le@6
-
-      - name: Stage the web bundle into www
-        run: |
-          rm -rf www
-          mkdir -p www
-          for p in *; do
-            case "$p" in
-              node_modules|www|android|native|.git|.github) continue;;
-            esac
-            cp -r "$p" www/
-          done
-          test -f www/index.html
+          npm install --no-audit --no-fund --legacy-peer-deps @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor-community/bluetooth-le@6
 
       - name: Add the Android platform
+        working-directory: cap
         run: |
-          npx cap init AEGIS com.aegis.shield --web-dir=www || true
+          npx cap init AEGIS com.aegis.shield --web-dir=www
           npx cap add android
           npx cap sync android
 
+      - name: Confirm assets were bundled into the APK
+        working-directory: cap
+        run: |
+          test -f android/app/src/main/assets/public/index.html
+          test -d android/app/src/main/assets/public/assets
+          echo "bundled assets: $(find android/app/src/main/assets/public -type f | wc -l)"
+
       - name: Build debug APK
+        working-directory: cap
         run: |
           cd android
           chmod +x gradlew
@@ -55,14 +67,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: aegis-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: cap/android/app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Publish the APK to a stable release tag
+      - name: Publish to the release tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release delete apk-latest --yes --cleanup-tag || true
-          gh release create apk-latest \
-            "android/app/build/outputs/apk/debug/app-debug.apk#aegis-debug.apk" \
-            --title "AEGIS debug APK (latest build)" \
-            --notes "Debug-signed Android package built from main. Web assets are bundled inside the APK, so it runs with the network off. Debug signature identifies no publisher."
+          gh release create apk-latest "cap/android/app/build/outputs/apk/debug/app-debug.apk#aegis-debug.apk" --title "AEGIS debug APK (latest build)" --notes "Debug-signed Android package built from main. Web assets are bundled inside the APK, so it runs with the network off. Debug signature identifies no publisher."
