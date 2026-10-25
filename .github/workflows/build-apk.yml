@@ -1,0 +1,68 @@
+name: Build AEGIS APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install Capacitor dependencies
+        run: |
+          npm init -y
+          npm i --no-audit --no-fund @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor-community/bluetooth-le@6
+
+      - name: Stage the web bundle into www
+        run: |
+          rm -rf www
+          mkdir -p www
+          for p in *; do
+            case "$p" in
+              node_modules|www|android|native|.git|.github) continue;;
+            esac
+            cp -r "$p" www/
+          done
+          test -f www/index.html
+
+      - name: Add the Android platform
+        run: |
+          npx cap init AEGIS com.aegis.shield --web-dir=www || true
+          npx cap add android
+          npx cap sync android
+
+      - name: Build debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aegis-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Publish the APK to a stable release tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete apk-latest --yes --cleanup-tag || true
+          gh release create apk-latest \
+            "android/app/build/outputs/apk/debug/app-debug.apk#aegis-debug.apk" \
+            --title "AEGIS debug APK (latest build)" \
+            --notes "Debug-signed Android package built from main. Web assets are bundled inside the APK, so it runs with the network off. Debug signature identifies no publisher."
