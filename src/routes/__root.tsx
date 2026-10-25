@@ -8,10 +8,8 @@ import { SiteHeader } from "@/components/site-header";
  * A missing / oddly-typed field routinely throws during render — `x.toLocaleString()` when `x`
  * is undefined, `.map()` on a value that isn't an array, `obj.prop.sub` on a null — and without
  * a boundary that single throw blanks the entire page. Here it degrades to one contained
- * message; the rest of the site keeps working. `componentDidCatch` re-logs to the console AND
- * beacons the platform's site-activity collector (React render errors do NOT trigger
- * window.onerror, so the collector would otherwise never see them) — so the error still reaches
- * the builder to fix.
+ * message; the rest of the site keeps working. `componentDidCatch` re-logs the error to the
+ * console. It does not send the error anywhere.
  */
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
@@ -20,23 +18,6 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   }
   componentDidCatch(error: Error, info: unknown) {
     console.error("[render-error]", error, info);
-    try {
-      const v = (window as any).__VINCEN__;
-      if (v?.logUrl && navigator?.sendBeacon) {
-        navigator.sendBeacon(
-          v.logUrl,
-          JSON.stringify({
-            type: "js-error",
-            kind: "render",
-            message: String(error?.message || error),
-            stack: error?.stack,
-            siteId: v.siteId,
-          }),
-        );
-      }
-    } catch {
-      /* best-effort — never let logging throw */
-    }
   }
   render() {
     if (this.state.error) {
