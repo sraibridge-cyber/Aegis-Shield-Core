@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>SYSTEM 44 · AEGIS — Resonant Hull Console</title>
+    <meta name="description" content="AEGIS 44 is a phone-first, local-first resonant hull console. Real WebCrypto bonding, a tamper-evident local ledger, live resonance measurement, and zero network calls at runtime." />
+    <meta name="theme-color" content="#06080a" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="AEGIS 44" />
+    <link rel="manifest" href="./manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="./icons/mark.svg" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <script>
+      (function () {
+        var known = ["/", "/nerve", "/mind", "/memory", "/soul", "/verify", "/clock", "/free", "/install", "/wiring", "/selftest", "/self-test", "/guide", "/instance", "/recovery"];
+        var p = location.pathname.replace(/\/+$/, "") || "/";
+        if (known.indexOf(p) >= 0 && !location.hash) {
+          try { history.replaceState(null, "", location.pathname + location.search + "#" + p); } catch (e) {}
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      (function () {
+        var css = document.createElement("link");
+        css.rel = "stylesheet";
+        css.href = "./assets/index-VLdJOqoS.css";
+        document.head.appendChild(css);
+        var app = document.createElement("script");
+        app.type = "module";
+        app.src = "./assets/index-CL6IUdNY.js";
+        document.body.appendChild(app);
+      })();
+    </script>
+  <script>(function(){var v="51bd168c-3728-4308-9e07-a99b666f4158",t=Date.now(),s=0;function f(){if(s)return;s=1;try{navigator.sendBeacon('/__va',JSON.stringify({v:v,d:Date.now()-t}))}catch(e){}}addEventListener('visibilitychange',function(){document.visibilityState==='hidden'&&f()});addEventListener('pagehide',f)})();</script></body>
+</html>
