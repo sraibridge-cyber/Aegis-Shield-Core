@@ -1,65 +1,91 @@
-# One-time migration: overlays the verified AEGIS tree onto main, then goes inert.
-# GitHub refuses workflow-file changes pushed with GITHUB_TOKEN, so this overlay
-# deliberately never touches .github/. It runs once: the commit it pushes adds
-# BOOTSTRAP-DONE, and every later run exits early because that marker exists.
 name: Bootstrap Tree
+
 on:
+  workflow_dispatch:
   push:
     branches: [ main ]
+    paths:
+      - .bootstrap-trigger
+
 permissions:
   contents: write
-concurrency:
-  group: bootstrap-tree
-  cancel-in-progress: false
+
+env:
+  ARCHIVE: "https://storage.googleapis.com/vincen-ai/sessions/aSyNcgKIMVufN26oSQvs/outputs/6Qnt8AwfWcSGIrqpwwbI/Aegis-Shield-Core-Repo.zip?v=1792977707543"
+  STALE_INDEX_BYTES: "478904"
+
 jobs:
-  sync:
+  overlay:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
           fetch-depth: 0
-      - name: Stop if the migration already ran
-        id: guard
-        run: |
-          if [ -f BOOTSTRAP-DONE ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "marker present — nothing to do"
-          else
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Fetch the pinned tree archive
-        if: steps.guard.outputs.run == 'true'
-        env:
-          TREE_URL: "https://storage.googleapis.com/vincen-ai/sessions/aSyNcgKIMVufN26oSQvs/outputs/6Qnt8AwfWcSGIrqpwwbI/Aegis-Shield-Core-Repo.zip?v=1792977707543"
+
+      - name: Download and extract the archive
         run: |
           set -euo pipefail
-          curl -fsSL --retry 4 --retry-delay 3 -o /tmp/tree.zip "$TREE_URL"
-          test -s /tmp/tree.zip
+          curl -fsSL "$ARCHIVE" -o /tmp/tree.zip
           echo "archive bytes: $(stat -c%s /tmp/tree.zip)"
-          sha256sum /tmp/tree.zip | tee /tmp/tree.sha
-      - name: Overlay the tree without touching workflow files
-        if: steps.guard.outputs.run == 'true'
-        run: |
-          set -euo pipefail
+          sha256sum /tmp/tree.zip
           rm -rf /tmp/tree && mkdir -p /tmp/tree
           unzip -q /tmp/tree.zip -d /tmp/tree
-          SRC="$(dirname "$(find /tmp/tree -name package.json -not -path '*/node_modules/*' | head -n1)")"
-          echo "archive root: $SRC"
-          test -f "$SRC/index.html"
-          test -d "$SRC/public/assets"
-          rsync -a --exclude '.git/' --exclude '.github/' "$SRC"/ ./
-          echo "public/assets files: $(find public/assets -type f | wc -l)"
-          grep -o 'assets/index-[A-Za-z0-9_-]*\.js' index.html | head -n1 || true
-      - name: Commit the tree
-        if: steps.guard.outputs.run == 'true'
+          echo "--- extracted top level ---"
+          ls -1 /tmp/tree
+          echo "--- every index.html found ---"
+          find /tmp/tree -name index.html -print
+
+      - name: Resolve the app root
         run: |
           set -euo pipefail
+          ROOT=""
+          while IFS= read -r d; do
+            if ls "$d"/public/assets/index-*.js >/dev/null 2>&1; then ROOT="$d"; break; fi
+          done < <(find /tmp/tree -name index.html -printf '%h\n' | sort)
+          if [ -z "$ROOT" ]; then
+            echo "FATAL: no directory holds both index.html and public/assets/index-*.js"
+            exit 1
+          fi
+          echo "APP_ROOT=$ROOT" >> "$GITHUB_ENV"
+          echo "resolved app root: $ROOT"
+          ls -1 "$ROOT/public" | head -20
+
+      - name: Verify this is the patched bundle, not the stale one
+        run: |
+          set -euo pipefail
+          IDX=$(ls "$APP_ROOT"/public/assets/index-*.js | head -n 1)
+          IDX_SIZE=$(stat -c%s "$IDX")
+          ST=$(ls "$APP_ROOT"/public/assets/selftest-*.js 2>/dev/null | head -n 1 || true)
+          ST_SIZE=0
+          if [ -n "$ST" ]; then ST_SIZE=$(stat -c%s "$ST"); fi
+          echo "index bundle:    $(basename "$IDX") = $IDX_SIZE bytes"
+          sha256sum "$IDX"
+          echo "selftest bundle: ${ST:-none} = $ST_SIZE bytes"
+          echo "public file count: $(find "$APP_ROOT/public" -type f | wc -l)"
+          if [ "$IDX_SIZE" = "$STALE_INDEX_BYTES" ]; then
+            echo "FATAL: archive carries the stale bundle ($IDX_SIZE bytes). Refusing to commit."
+            exit 1
+          fi
+          echo "OK: bundle differs from the known stale one."
+
+      - name: Overlay app files onto main
+        run: |
+          set -euo pipefail
+          mkdir -p public
+          rsync -a "$APP_ROOT/public/" public/
+          cp "$APP_ROOT/index.html" index.html
+          if [ -d "$APP_ROOT/native" ]; then rsync -a "$APP_ROOT/native/" native/; fi
+          for f in README.md CHANGELOG.md SECURITY.md LICENSE; do
+            if [ -f "$APP_ROOT/$f" ]; then cp "$APP_ROOT/$f" "$f"; fi
+          done
           git config user.name "aegis-bootstrap"
           git config user.email "aegis-bootstrap@users.noreply.github.com"
-          date -u +%Y-%m-%dT%H:%M:%SZ > BOOTSTRAP-DONE
           git add -A
-          git status --porcelain | head -n 30
-          SHA="$(cut -d' ' -f1 /tmp/tree.sha)"
-          git commit -m "fix: land the verified AEGIS tree (BLE state-merge crash, nav truncation, safe-area clearance, handler boundary) — archive sha256 ${SHA}"
-          git push origin HEAD:main
+          echo "--- staged changes (first 60) ---"
+          git status --short | head -60
+          if git diff --cached --quiet; then
+            echo "nothing to commit"
+            exit 0
+          fi
+          git commit -m "bootstrap: overlay patched dist bundle from stored archive"
+          git push
