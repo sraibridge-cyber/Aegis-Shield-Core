@@ -212,6 +212,48 @@ jobs:
           for (const e of list) console.log('  ' + e.classpath);
           NODE
           echo "--- plugins.json written above ---"
+      - name: Align the minimum SDK with the native modules
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const WANT = 23;
+          const candidates = ['cap/android/variables.gradle', 'cap/android/build.gradle', 'cap/android/app/build.gradle'];
+          const patched = [];
+          for (const p of candidates) {
+            if (!fs.existsSync(p)) continue;
+            const before = fs.readFileSync(p, 'utf8');
+            const after = before.replace(/minSdkVersion(\s*)=?(\s*)(\d+)/g, function (m, a, b, n) {
+              if (Number(n) >= WANT) return m;
+              return 'minSdkVersion' + a + '=' + b + WANT;
+            });
+            if (after !== before) {
+              fs.writeFileSync(p, after);
+              patched.push(p);
+              console.log('patched minSdkVersion in ' + p);
+            }
+          }
+          let lowest = null;
+          for (const p of candidates) {
+            if (!fs.existsSync(p)) continue;
+            const s = fs.readFileSync(p, 'utf8');
+            for (const line of s.split('\n')) {
+              if (/minSdk/.test(line)) console.log('DECLARED ' + p + ': ' + line.trim());
+            }
+            const re = /minSdkVersion\s*=\s*(\d+)/g;
+            let m;
+            while ((m = re.exec(s)) !== null) {
+              const v = Number(m[1]);
+              if (lowest === null || v < lowest) lowest = v;
+            }
+          }
+          if (lowest !== null && lowest < WANT) {
+            console.error('MINSDK FAIL: a declared minSdkVersion of ' + lowest + ' is below ' + WANT);
+            process.exit(1);
+          }
+          console.log('MINSDK OK: no declared minSdkVersion below ' + WANT + (patched.length ? ' (patched: ' + patched.join(', ') + ')' : ' (nothing to patch)'));
+          NODE
+          grep -rn "minSdk" cap/android/variables.gradle cap/android/build.gradle cap/android/app/build.gradle 2>/dev/null || true
       - name: Build the debug APK
         working-directory: cap/android
         run: |
