@@ -23,24 +23,72 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      - name: Verify the repo's native plugin sources
+        run: |
+          set -euo pipefail
+          missing=0
+          for f in \
+            native/plugins/aegis-keystore/android/build.gradle \
+            native/plugins/aegis-keystore/android/src/main/java/io/aegis/keystore/AegisKeystorePlugin.java \
+            native/plugins/aegis-keystore/android/src/main/java/io/aegis/keystore/EcdsaDer.java \
+            native/plugins/hull-telemetry/android/build.gradle \
+            native/plugins/hull-telemetry/android/src/main/java/io/aegis/telemetry/HullTelemetryPlugin.java; do
+            if [ -f "$f" ]; then
+              echo "PRESENT: $f"
+            else
+              echo "ABSENT: $f"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::Native plugin sources are missing from main; refusing to build a plugin-less APK."
+            exit 1
+          fi
+          for g in native/plugins/aegis-keystore/android/build.gradle native/plugins/hull-telemetry/android/build.gradle; do
+            for need in com.android.library namespace; do
+              if grep -q "$need" "$g"; then
+                echo "PLUGIN PREREQ OK: $g declares $need"
+              else
+                echo "::error::$g is missing $need; the build would fail with an opaque Gradle error."
+                exit 1
+              fi
+            done
+          done
+
       - name: Stage the built web bundle
         run: |
           set -euo pipefail
           rm -rf cap
-          mkdir -p cap/www
-          cp index.html cap/www/
-          cp -r public/. cap/www/
+          mkdir -p cap
+          cp -r src/web cap/web 2>/dev/null || true
+          cp -r public cap/public
+          cp package.json cap/package.json 2>/dev/null || true
+          ls -la cap
+
+      - name: Build the static site
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+          npx vite build --outDir dist || npm run build
+          test -d dist
+          ls dist
+
+      - name: Assemble the Capacitor webDir
+        run: |
+          set -euo pipefail
+          rm -rf cap/www
+          cp -r dist cap/webdir
+          mv cap/webdir cap/www
           test -f cap/www/index.html
           test -f cap/www/manifest.json
           test -f cap/www/service-worker.js
           test -d cap/www/icons
           ls cap/www/assets/index-*.js >/dev/null
-          echo "staged files: $(find cap/www -type f | wc -l)"
+          echo "staged web files: $(find cap/www -type f | wc -l)"
 
       - name: Install Capacitor in an isolated project directory
         working-directory: cap
         run: |
-          npm init -y
           npm install --no-audit --no-fund --legacy-peer-deps @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor-community/bluetooth-le@6
 
       - name: Add the Android platform
@@ -50,28 +98,219 @@ jobs:
           npx cap add android
           npx cap sync android
 
-      - name: Confirm assets were bundled into the APK
-        working-directory: cap
+      - name: Overlay the repo's native plugin modules and wire them into Gradle
         run: |
-          test -f android/app/src/main/assets/public/index.html
-          test -d android/app/src/main/assets/public/assets
-          echo "bundled assets: $(find android/app/src/main/assets/public -type f | wc -l)"
+          set -euo pipefail
+          mkdir -p cap/native
+          cp -r native/plugins cap/native/plugins
+          echo "modules copied:"
+          ls cap/native/plugins
+          node <<'NODE'
+          const fs = require('fs');
+          const settings = 'cap/android/settings.gradle';
+          let st = fs.readFileSync(settings, 'utf8');
+          const modules = [
+            { id: 'aegis-keystore', dir: '../native/plugins/aegis-keystore/android' },
+            { id: 'hull-telemetry', dir: '../native/plugins/hull-telemetry/android' }
+          ];
+          for (const m of modules) {
+            if (st.includes("include ':" + m.id + "'")) continue;
+            st += "\ninclude ':" + m.id + "'\nproject(':" + m.id + "').projectDir = new File(rootDir, '" + m.dir + "')\n";
+          }
+          fs.writeFileSync(settings, st);
+          const app = 'cap/android/app/build.gradle';
+          let s = fs.readFileSync(app, 'utf8');
+          if (!s.includes("project(':aegis-keystore')")) {
+            const deps = "    implementation project(':aegis-keystore')\n    implementation project(':hull-telemetry')\n";
+            if (/dependencies\s*\{/.test(s)) {
+              s = s.replace(/dependencies\s*\{/, function (m) { return m + '\n' + deps; });
+            } else {
+              s += '\ndependencies {\n' + deps + '}\n';
+            }
+            fs.writeFileSync(app, s);
+          }
+          console.log('gradle wiring written');
+          NODE
+          echo "--- settings.gradle ---"
+          cat cap/android/settings.gradle
+          echo "--- app dependencies ---"
+          grep -n "project(':" cap/android/app/build.gradle || true
 
-      - name: Build debug APK
-        working-directory: cap
+      - name: Overlay the app manifest and plugin registration
         run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          set -euo pipefail
+          MANIFEST=cap/android/app/src/main/AndroidManifest.xml
+          {
+            echo '<?xml version="1.0" encoding="utf-8"?>'
+            echo '<manifest xmlns:android="http://schemas.android.com/apk/res/android"'
+            echo '    xmlns:tools="http://schemas.android.com/tools">'
+            echo '    <uses-permission android:name="android.permission.INTERNET" />'
+            echo '    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"'
+            echo '        android:usesPermissionFlags="neverForLocation" />'
+            echo '    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />'
+            echo '    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />'
+            echo '    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />'
+            echo '    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" tools:node="remove" />'
+            echo '    <application'
+            echo '        android:allowBackup="false"'
+            echo '        android:fullBackupContent="false"'
+            echo '        android:icon="@mipmap/ic_launcher"'
+            echo '        android:label="@string/app_name"'
+            echo '        android:roundIcon="@mipmap/ic_launcher_round"'
+            echo '        android:supportsRtl="true"'
+            echo '        android:theme="@style/AppTheme">'
+            echo '        <activity'
+            echo '            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"'
+            echo '            android:name=".MainActivity"'
+            echo '            android:label="@string/title_activity_main"'
+            echo '            android:theme="@style/AppTheme.NoActionBarLaunch"'
+            echo '            android:launchMode="singleTask"'
+            echo '            android:exported="true">'
+            echo '            <intent-filter>'
+            echo '                <action android:name="android.intent.action.MAIN" />'
+            echo '                <category android:name="android.intent.category.LAUNCHER" />'
+            echo '            </intent-filter>'
+            echo '        </activity>'
+            echo '        <provider'
+            echo '            android:name="androidx.core.content.FileProvider"'
+            echo '            android:authorities="${applicationId}.fileprovider"'
+            echo '            android:exported="false"'
+            echo '            android:grantUriPermissions="true">'
+            echo '            <meta-data'
+            echo '                android:name="androidx.core.content.FileProvider"'
+            echo '                android:resource="@xml/file_paths" />'
+            echo '        </provider>'
+            echo '    </application>'
+            echo '</manifest>'
+          } > "$MANIFEST"
+          node <<'NODE'
+          const fs = require('fs');
+          const p = 'cap/android/app/src/main/assets/capacitor.plugins.json';
+          let list = [];
+          if (fs.existsSync(p)) {
+            const raw = fs.readFileSync(p, 'utf8').trim();
+            if (raw) list = JSON.parse(raw);
+          }
+          const wanted = [
+            { pkg: '@capacitor-community/bluetooth-le', classpath: 'com.capacitorjs.community.bluetoothle.BluetoothLePlugin' },
+            { pkg: '@aegis/keystore', classpath: 'io.aegis.keystore.AegisKeystorePlugin' },
+            { pkg: '@aegis/hull-telemetry', classpath: 'io.aegis.telemetry.HullTelemetryPlugin' }
+          ];
+          for (const w of wanted) {
+            if (!list.some((e) => e.classpath === w.classpath)) list.push(w);
+          }
+          fs.writeFileSync(p, JSON.stringify(list, null, 2) + '\n');
+          console.log('registered plugin classpaths:');
+          for (const e of list) console.log('  ' + e.classpath);
+          NODE
+          echo "--- manifest head ---"
+          head -n 12 "$MANIFEST"
+
+      - name: Verify the dex, the plugin registry and the permission surface
+        run: |
+          set -euo pipefail
+          APK=cap/android/app/build/outputs/apk/debug/app-debug.apk
+          test -f "$APK"
+          echo "APK size: $(stat -c%s "$APK") bytes"
+          DEX_FILES=$(unzip -Z1 "$APK" | grep -E '^classes[0-9]*\.dex$' || true)
+          echo "dex entries: $DEX_FILES"
+          fail=0
+          for cls in AegisKeystorePlugin HullTelemetryPlugin BluetoothLePlugin; do
+            if unzip -p "$APK" 'classes*.dex' | strings | grep -q "$cls"; then
+              echo "GATE OK: dex contains $cls"
+            else
+              echo "GATE FAIL: dex is missing $cls"
+              fail=1
+            fi
+          done
+          unzip -p "$APK" assets/capacitor.plugins.json > /tmp/gate-plugins.json
+          cat /tmp/gate-plugins.json
+          for cls in AegisKeystorePlugin HullTelemetryPlugin BluetoothLePlugin; do
+            if grep -q "$cls" /tmp/gate-plugins.json; then
+              echo "GATE OK: capacitor.plugins.json lists $cls"
+            else
+              echo "GATE FAIL: capacitor.plugins.json does not list $cls"
+              fail=1
+            fi
+          done
+          ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          AAPT2=$(ls -1 "$ANDROID_SDK_ROOT"/build-tools/*/aapt2 2>/dev/null | sort -V | tail -n 1 || true)
+          : > gate-permissions.txt
+          if [ -n "$AAPT2" ] && [ -x "$AAPT2" ]; then
+            echo "reading the merged manifest with $AAPT2"
+            "$AAPT2" dump permissions "$APK" >> gate-permissions.txt 2>&1 || true
+          fi
+          if [ ! -s gate-permissions.txt ]; then
+            echo "aapt2 unavailable; reading the binary manifest string pool (both encodings)"
+            unzip -p "$APK" AndroidManifest.xml > /tmp/am.bin
+            strings -a /tmp/am.bin >> gate-permissions.txt
+            strings -a -e l /tmp/am.bin >> gate-permissions.txt
+          fi
+          echo "--- effective permission surface ---"
+          grep -E 'permission|uses-' gate-permissions.txt || true
+          echo "------------------------------------"
+          if grep -q 'android.permission.BLUETOOTH_SCAN' gate-permissions.txt; then
+            echo "GATE OK: BLUETOOTH_SCAN is declared"
+          else
+            echo "GATE FAIL: BLUETOOTH_SCAN is missing"
+            fail=1
+          fi
+          if grep -q 'android.permission.BLUETOOTH_CONNECT' gate-permissions.txt; then
+            echo "GATE FAIL: BLUETOOTH_CONNECT is present; the receive-only policy forbids it"
+            fail=1
+          else
+            echo "GATE OK: BLUETOOTH_CONNECT is absent"
+          fi
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::Gate failed; nothing will be published."
+            echo "GATE RESULT: FAIL"
+            exit 1
+          fi
+          echo "GATE RESULT: PASS"
+
+      - name: Package the APK and its checksum
+        run: |
+          set -euo pipefail
+          APK=cap/android/app/build/outputs/apk/debug/app-debug.apk
+          STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          echo "APK_SIZE=$(stat -c%s "$APK")" >> "$GITHUB_ENV"
+          echo "APK_HASH=$(sha256sum "$APK" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+          cp "$APK" aegis-app-debug.apk
+          echo "AEGIS debug APK" > app-debug.apk.sha256
+          printf 'sha256:%s  aegis-app-debug.apk\n' "$(sha256sum aegis-app-debug.apk | cut -d' ' -f1)" >> app-debug.apk.sha256
+          echo "size: $(cat "$GITHUB_ENV")"
+          cat app-debug.apk.sha256
 
       - uses: actions/upload-artifact@v4
         with:
           name: aegis-debug-apk
-          path: cap/android/app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            aegis-app-debug.apk
+            app-debug.apk.sha256
+            gate-permissions.txt
 
-      - name: Publish to the release tag
+      - name: Publish without destroying the previous release
+        if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete apk-latest --yes --cleanup-tag || true
-          gh release create apk-latest "cap/android/app/build/outputs/apk/debug/app-debug.apk#aegis-debug.apk" --title "AEGIS debug APK (latest build)" --notes "Debug-signed Android package built from main. Web assets are bundled inside the APK, so it runs with the network off. Debug signature identifies no publisher."
+          set -euo pipefail
+          TAG="apk-$STAMP"
+          gh release create "$TAG" aegis-app-debug.apk app-debug.apk.sha256 \
+            --target "$GITHUB_SHA" \
+            --title "AEGIS debug APK $STAMP" \
+            --notes "Debug-signed APK built from main by workflow run $GITHUB_RUN_ID. Web assets are bundled inside the APK, so it runs with the network off. The debug signature identifies no publisher. sha256 in app-debug.apk.sha256."
+          echo "archived build published as $TAG"
+          OLD_ID=$(gh release view apk-latest --json databaseId --jq .databaseId 2>/dev/null || true)
+          OLD_ASSETS=$(gh release view apk-latest --json assets --jq '.assets | length' 2>/dev/null || echo 0)
+          if [ -n "$OLD_ID" ]; then
+            echo "previous apk-latest release id $OLD_ID carries $OLD_ASSETS asset(s)"
+            gh release edit apk-latest --tag "apk-previous-$STAMP" --title "AEGIS debug APK (superseded $STAMP)"
+            echo "previous latest moved to apk-previous-$STAMP"
+          fi
+          gh release create apk-latest aegis-app-debug.apk app-debug.apk.sha256 \
+            --target "$GITHUB_SHA" \
+            --title "AEGIS debug APK (latest build)" \
+            --notes "Debug-signed APK built from main by workflow run $GITHUB_RUN_ID. Web assets are bundled inside the APK, so it runs with the network off. The debug signature identifies no publisher. sha256 in app-debug.apk.sha256."
+          echo "apk-latest now serves the build from $GITHUB_SHA"
