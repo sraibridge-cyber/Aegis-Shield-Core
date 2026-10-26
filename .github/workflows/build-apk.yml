@@ -88,9 +88,9 @@ jobs:
       - name: Add the Android platform
         working-directory: cap
         run: |
-          nx cap init AEGIS com.aegis.shield --web-dir=www
-          nx cap add android
-          nx cap sync android
+          npx cap init AEGIS com.aegis.shield --web-dir=www
+          npx cap add android
+          npx cap sync android
 
       - name: Overlay the repo's native plugin modules and wire them into Gradle
         run: |
