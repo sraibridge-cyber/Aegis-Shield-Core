@@ -389,12 +389,23 @@ jobs:
               PREV_HASH=$(sha256sum prev/app-debug.apk | cut -d' ' -f1)
               PREV_SIZE=$(stat -c%s prev/app-debug.apk)
               PREV_TAG="apk-prev-${PREV_HASH:0:12}"
-              if gh release view "$PREV_TAG" >/dev/null 2>&1; then
+              if [ "$PREV_HASH" = "$APK_HASH" ]; then
+                echo "SUPERSEDED: apk-latest already serves this build (sha256 $PREV_HASH); nothing to preserve"
+              elif gh release view "$PREV_TAG" >/dev/null 2>&1; then
                 echo "PRESERVED ALREADY: $PREV_TAG (sha256 $PREV_HASH)"
               else
-                printf 'sha256:%s  app-debug.apk\nbytes:%s\n' "$PREV_HASH" "$PREV_SIZE" > prev/app-debug.apk.sha256
-                gh release create "$PREV_TAG" prev/app-debug.apk prev/app-debug.apk.sha256 --prerelease --title "AEGIS debug APK - superseded build" --notes "Superseded build preserved verbatim for history. sha256 $PREV_HASH, $PREV_SIZE bytes. Not the current download; the current build is on apk-latest."
-                echo "PRESERVED: superseded build archived as $PREV_TAG (sha256 $PREV_HASH)"
+                HOLDER=""
+                for t in $(gh release list --limit 200 --json tagName --jq '.[].tagName'); do
+                  if [ "$t" = "apk-latest" ]; then continue; fi
+                  if gh release view "$t" --json body --jq '.body' 2>/dev/null | grep -q "$PREV_HASH"; then HOLDER="$t"; break; fi
+                done
+                if [ -n "$HOLDER" ]; then
+                  echo "PRESERVED ALREADY: $HOLDER holds sha256 $PREV_HASH; not storing a duplicate copy"
+                else
+                  printf 'sha256:%s  app-debug.apk\nbytes:%s\n' "$PREV_HASH" "$PREV_SIZE" > prev/app-debug.apk.sha256
+                  gh release create "$PREV_TAG" prev/app-debug.apk prev/app-debug.apk.sha256 --prerelease --title "AEGIS debug APK - superseded build (sole copy)" --notes "Superseded build preserved verbatim for history. sha256 $PREV_HASH, $PREV_SIZE bytes. This is the ONLY copy of this binary in the repository: it predates the timestamped apk-<stamp> scheme, so no such tag holds it. Not the current download; the current build is on apk-latest."
+                  echo "PRESERVED: superseded build archived as $PREV_TAG (sha256 $PREV_HASH)"
+                fi
               fi
             else
               echo "::warning::apk-latest carries no app-debug.apk, so there was nothing to preserve"
@@ -404,14 +415,14 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$APK" "$SUM" --clobber
           else
-            gh release create "$TAG" "$APK" "$SUM" --target "$GITHUB_SHA" --prerelease --title "AEGIS debug APK $STAMP" --notes "Debug-signed APK built from $GITHUB_SHA by workflow run $GITHUB_RUN_ID. sha256 $APK_HASH, $APK_SIZE bytes."
+            gh release create "$TAG" "$APK" "$SUM" --target "$GITHUB_SHA" --prerelease --title "AEGIS debug APK $STAMP" --notes "Debug-signed APK built from $GITHUB_SHA by workflow run $GITHUB_RUN_ID. sha256 $APK_HASH, $APK_SIZE bytes. This is the permanent record for this build: apk-latest moves on to later builds, this tag does not."
           fi
           echo "ARCHIVED: $TAG"
           if gh release view apk-latest >/dev/null 2>&1; then
             gh release upload apk-latest "$APK" "$SUM" --clobber
             gh release edit apk-latest --title "AEGIS debug APK (latest build, built $STAMP)" --notes "AUTHORITATIVE BUILD TIME: $STAMP. Git commit: $GITHUB_SHA. Workflow run: $GITHUB_RUN_ID. Web assets are bundled inside the APK, so it works offline. The debug signature identifies no publisher. sha256 $APK_HASH, $APK_SIZE bytes. NOTE: GitHub reports this release's published date as the moment the apk-latest tag was first created; it does not change when the asset is replaced, so that date is older than this binary. The build time in this title is authoritative."
           else
-            gh release create apk-latest "$APK" "$SUM" --target $GITHUB_SHA --title "AEGIS debug APK (latest build, built $STAMP)" --notes "AUTHORITATIVE BUILD TIME: $STAMP. Git commit: $GITHUB_SHA. Workflow run: $GITHUB_RUN_ID. sha256 $APK_HASH, $APK_SIZE bytes."
+            gh release create apk-latest "$APK" "$SUM" --target $GITHUB_SHA --title "AEGIS debug APK (latest build, built $STAMP)" --notes "AUTHORITATIVE BUILD TIME: $STAMP. Git commit: $GITHUB_SHA. Workflow run: $GITHUB_RUN_ID. Web assets are bundled inside the APK, so it works offline. The debug signature identifies no publisher. sha256 $APK_HASH, $APK_SIZE bytes. This release was created together with this binary, so its published date is accurate."
           fi
           mkdir -p verify
           gh release download apk-latest --pattern app-debug.apk --dir verify --clobber
