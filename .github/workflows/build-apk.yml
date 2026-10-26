@@ -388,26 +388,37 @@ jobs:
           echo "--- web asset integrity: what the APK actually ships ---"
           set +e
           python3 - <<'PYEOF'
-          import hashlib, os, re, sys, zipfile
+          import hashlib, json, os, re, sys, zipfile
           apk = 'cap/android/app/build/outputs/apk/debug/app-debug.apk'
-          src = 'cap/www'
+          with open('native/capacitor.config.json') as cfh:
+              webdir = json.load(cfh).get('webDir')
+          if not webdir:
+              print('GATE FAIL: native/capacitor.config.json declares no webDir, so the tree the APK is compared against cannot be identified')
+              sys.exit(6)
+          src = os.path.join('cap', webdir)
+          if not os.path.isdir(src):
+              print('GATE FAIL: capacitor.config.json declares webDir ' + webdir + ' but ' + src + ' does not exist, so the compared tree is not the tree that was staged into the build')
+              sys.exit(6)
+          print('staged web tree, derived from capacitor.config.json webDir ' + webdir + ': ' + src)
           zf = zipfile.ZipFile(apk)
           names = [n for n in zf.namelist() if not n.endswith('/')]
           html = [n for n in names if n.rsplit('/', 1)[-1] == 'index.html']
           if not html:
               print('GATE FAIL: the APK contains no index.html, so the installed app would open a blank or error shell')
               sys.exit(3)
-          pref = ''
-          for root in ['assets/public/', 'public/']:
-              if [n for n in html if n.startswith(root)]:
-                  pref = root
-                  break
-          if not pref:
-              deepest = max(html, key=lambda n: n.count('/'))
-              pref = deepest.rsplit('/', 1)[0] + '/'
+          # Capacitor for Android maps webDir into assets/public/. That mapping is fixed by Capacitor,
+          # so the gate asserts it instead of searching for a prefix that happens to contain an index.html.
+          pref = 'assets/public/'
+          if not [n for n in html if n.startswith(pref)]:
+              print('GATE FAIL: the APK has no index.html at ' + pref + '; the index.html entries it does contain are: ' + ', '.join(sorted(html)) + '. Capacitor serves webDir from ' + pref + ', so the installed app would not find its shell.')
+              sys.exit(3)
+          strays = sorted(n for n in html if not n.startswith(pref))
+          for n in strays:
+              if not n.startswith('org/apache/cordova/'):
+                  print('GATE FAIL: an index.html outside the web root could act as a second app shell and ship a different app than the one staged: ' + n)
+                  sys.exit(3)
           print('web root inside the APK: ' + pref)
-          if len(html) > 1:
-              print('note: %d index.html entries present; evaluating %s' % (len(html), pref))
+          print('index.html entries: %d checked at the web root, %d outside it, all stock cordova-android scaffolding: %s' % (len(html) - len(strays), len(strays), ', '.join(strays) if strays else 'none'))
           packed = {}
           for n in names:
               if not n.startswith(pref):
@@ -424,6 +435,9 @@ jobs:
                   with open(full, 'rb') as fh:
                       staged[rel] = hashlib.sha256(fh.read()).hexdigest()
           print('staged files: %d | packaged web files: %d' % (len(staged), len(packed)))
+          if not staged:
+              print('GATE FAIL: ' + src + ' contains no files, so comparing it against the APK would assert nothing')
+              sys.exit(4)
           missing = sorted(set(staged) - set(packed))
           differing = sorted(k for k in staged if k in packed and staged[k] != packed[k])
           extra = sorted(set(packed) - set(staged))
