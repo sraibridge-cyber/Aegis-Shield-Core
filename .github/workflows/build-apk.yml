@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: apk-publish
+  cancel-in-progress: false
+
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -88,9 +92,23 @@ jobs:
       - name: Add the Android platform
         working-directory: cap
         run: |
-          npx cap init AEGIS com.aegis.shield --web-dir=www
-          npx cap add android
+          set -euo pipefail
+          REPO_CONFIG="$GITHUB_WORKSPACE/native/capacitor.config.json"
+          if [ ! -f "$REPO_CONFIG" ]; then
+            echo "::error::native/capacitor.config.json is absent; this workflow will not invent the app identity"
+            exit 1
+          fi
+          cp "$REPO_CONFIG" capacitor.config.json
+          echo "using the repo's own capacitor.config.json:"
+          cat capacitor.config.json
+          node -e 'const fs = require("fs"); const c = JSON.parse(fs.readFileSync("capacitor.config.json", "utf8")); for (const k of ["appId","appName","webDir"]) { if (!c[k] || typeof c[k] !== "string") { console.error("::error::capacitor.config.json has no string " + k); process.exit(1); } } console.log("CONFIG OK: appId=" + c.appId + " appName=" + c.appName + " webDir=" + c.webDir);'
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
           npx cap sync android
+          echo "--- config actually used for the android project ---"
+          cat capacitor.config.json
+          node -e 'const fs=require("fs"); const c=JSON.parse(require("fs").readFileSync("capacitor.config.json","utf8")); if (!require("fs").existsSync("android/app/build.gradle")) { console.error("::error::cap/android/app/build.gradle is missing after cap add"); process.exit(1); } const g=require("fs").readFileSync("android/app/build.gradle","utf8"); const m=g.match(/applicationId\s*=?\s*"([^"]+)"/); if (!m) { console.error("::error::no applicationId found in cap/android/app/build.gradle"); process.exit(1); } if (m[1] !== c.appId) { console.error("::error::cap add produced applicationId " + m[1] + " but native/capacitor.config.json says " + c.appId); process.exit(1); } console.log("IDENTITY OK: android applicationId " + m[1] + " matches native/capacitor.config.json");'
 
       - name: Overlay the repo's native plugin modules and wire them into Gradle
         run: |
@@ -339,6 +357,34 @@ jobs:
           else
             echo "GATE OK: BLUETOOTH_CONNECT is absent"
           fi
+          REPO_CONFIG="$GITHUB_WORKSPACE/native/capacitor.config.json"
+          CONFIG_ID=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).appId)' "$REPO_CONFIG" 2>/dev/null || true)
+          BUILT_ID=$(grep -oE 'applicationId[[:space:]]*=?[[:space:]]*"[^"]+"' cap/android/app/build.gradle | head -n1 | sed -E 's/.*"([^"]+)"/\1/' || true)
+          if [ -z "$CONFIG_ID" ]; then
+            echo "GATE FAIL: native/capacitor.config.json declares no appId, so the built identity cannot be checked"
+            fail=1
+          elif [ -z "$BUILT_ID" ]; then
+            echo "::error::could not read applicationId from cap/android/app/build.gradle"
+            fail=1
+          elif [ "$BUILT_ID" != "$CONFIG_ID" ]; then
+            echo "::error::the project's applicationId ($BUILT_ID) differs from native/capacitor.config.json ($CONFIG_ID)"
+            fail=1
+          else
+            echo "GATE OK: applicationId $BUILT_ID matches native/capacitor.config.json"
+          fi
+          if [ -n "$AAPT2" ] && [ -x "$AAPT2" ]; then
+            APK_PKG=$("$AAPT2" dump badging "$APK" 2>/dev/null | sed -nE "s/^package: name='([^']+)'.*/\1/p" | head -n1)
+            if [ -z "$APK_PKG" ]; then
+              echo "GATE NOT MEASURED: aapt2 could not read a package name out of the built APK"
+            elif [ "$APK_PKG" != "$CONFIG_ID" ]; then
+              echo "::error::the packaged APK declares package $APK_PKG but the repo config says $CONFIG_ID"
+              fail=1
+            else
+              echo "GATE OK: the packaged APK declares package $APK_PKG, matching the repo config"
+            fi
+          else
+            echo "GATE NOT MEASURED: aapt2 unavailable, so the packaged package name was not read"
+          fi
           if [ "$fail" -ne 0 ]; then
             echo "::error::Gate failed; nothing will be published."
             echo "GATE RESULT: FAIL"
@@ -383,6 +429,18 @@ jobs:
           test -f "$SUM"
           test -n "${APK_HASH:-}"
           echo "this build: $APK_SIZE bytes, sha256 $APK_HASH"
+          LIVE_STAMP=""
+          PREV_RECORDED_SHA=""
+          if gh release view apk-latest >/dev/null 2>&1; then
+            LIVE_BODY=$(gh release view apk-latest --json body --jq '.body')
+            LIVE_STAMP=$(printf '%s\n' "$LIVE_BODY" | sed -nE 's/^AUTHORITATIVE BUILD TIME: ([0-9]{8}T[0-9]{6}Z).*/\1/p' | head -n1)
+            PREV_RECORDED_SHA=$(printf '%s\n' "$LIVE_BODY" | sed -nE 's/^Git commit: ([0-9a-f]{40}).*/\1/p' | head -n1)
+            echo "apk-latest records build time ${LIVE_STAMP:-NOT RECORDED} from commit ${PREV_RECORDED_SHA:-NOT RECORDED}"
+            if [ -n "$LIVE_STAMP" ] && [ "$LIVE_STAMP" \> "$STAMP" ]; then
+              echo "::error::apk-latest already serves the newer build $LIVE_STAMP; this build is $STAMP. Refusing to move the public download backwards to older code."
+              exit 1
+            fi
+          fi
           if gh release view apk-latest >/dev/null 2>&1; then
             mkdir -p prev
             if gh release download apk-latest --pattern app-debug.apk --dir prev --clobber; then
@@ -403,8 +461,21 @@ jobs:
                   echo "PRESERVED ALREADY: $HOLDER holds sha256 $PREV_HASH; not storing a duplicate copy"
                 else
                   printf 'sha256:%s  app-debug.apk\nbytes:%s\n' "$PREV_HASH" "$PREV_SIZE" > prev/app-debug.apk.sha256
-                  gh release create "$PREV_TAG" prev/app-debug.apk prev/app-debug.apk.sha256 --prerelease --title "AEGIS debug APK - superseded build (sole copy)" --notes "Superseded build preserved verbatim for history. sha256 $PREV_HASH, $PREV_SIZE bytes. This is the ONLY copy of this binary in the repository: it predates the timestamped apk-<stamp> scheme, so no such tag holds it. Not the current download; the current build is on apk-latest."
-                  echo "PRESERVED: superseded build archived as $PREV_TAG (sha256 $PREV_HASH)"
+                  if [ -n "$PREV_RECORDED_SHA" ]; then
+                    gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" -f "ref=refs/tags/${PREV_TAG}" -f "sha=${PREV_RECORDED_SHA}" >/dev/null
+                    echo "ATTRIBUTED: ${PREV_TAG} created at ${PREV_RECORDED_SHA}, the commit apk-latest itself recorded as the builder of this binary"
+                    PREV_ATTRIBUTION="Built from commit $PREV_RECORDED_SHA, as recorded by apk-latest while this binary was the current download."
+                  else
+                    PREV_ATTRIBUTION="Builder commit NOT RECORDED: this binary predates per-release commit stamping. The tag points at the archiving run's commit $GITHUB_SHA and is NOT evidence of which source produced this binary."
+                    echo "::warning::no recorded builder commit for sha256 $PREV_HASH; the archive tag is not provenance"
+                  fi
+                  gh release create "$PREV_TAG" prev/app-debug.apk prev/app-debug.apk.sha256 --prerelease --title "AEGIS debug APK - superseded build (sole copy)" --notes "Superseded build preserved verbatim for history. sha256 $PREV_HASH, $PREV_SIZE bytes. This is the ONLY copy of this binary in the repository. Not the current download; the current build is on apk-latest. $PREV_ATTRIBUTION"
+                  PREV_DRAFT=$(gh release view "$PREV_TAG" --json isDraft --jq '.isDraft')
+                  if [ "$PREV_DRAFT" = "true" ]; then
+                    echo "::error::$PREV_TAG was created as a draft, so its assets are not publicly downloadable and the archive defeats its own purpose"
+                    exit 1
+                  fi
+                  echo "PRESERVED: superseded build archived as $PREV_TAG (sha256 $PREV_HASH), attribution: ${PREV_RECORDED_SHA:-NOT RECORDED}"
                 fi
               fi
             else
