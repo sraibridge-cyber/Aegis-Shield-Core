@@ -57,9 +57,13 @@ import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-@CapacitorPlugin(name = "HullTelemetry")
-@com.getcapacitor.annotation.Permission(alias = "ble", strings = {Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT})
-@com.getcapacitor.annotation.Permission(alias = "wifi", strings = {Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.NEARBY_WIFI_DEVICES})
+@CapacitorPlugin(
+    name = "HullTelemetry",
+    permissions = {
+        @com.getcapacitor.annotation.Permission(alias = "ble", strings = {Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT}),
+        @com.getcapacitor.annotation.Permission(alias = "wifi", strings = {Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.NEARBY_WIFI_DEVICES})
+    }
+)
 public class HullTelemetryPlugin extends Plugin {
     private static final String ALIAS = "aegis.sealA";
     private static final long SENSOR_WINDOW_MS = 2000L;
@@ -515,7 +519,8 @@ public class HullTelemetryPlugin extends Plugin {
             latch.countDown();
         }, BLE_WINDOW_MS);
         try { latch.await(BLE_WINDOW_MS + 500, TimeUnit.MILLISECONDS); } catch (InterruptedException ignored) { }
-        for (String k : seen.keys()) ads.put(seen.get(k));
+        java.util.Iterator<String> seenKeys = seen.keys();
+        while (seenKeys.hasNext()) { String k = seenKeys.next(); ads.put(seen.get(k)); }
         JSObject out = new JSObject();
         out.put("advertisements", ads);
         out.put("count", ads.length());
@@ -607,9 +612,9 @@ public class HullTelemetryPlugin extends Plugin {
         try {
             KeyguardManager km = (KeyguardManager) getContext().getSystemService(Context.KEYGUARD_SERVICE);
             out.put("deviceSecure", km != null && km.isDeviceSecure());
-            if (Build.VERSION.SDK_INT >= 29) {
+            if (Build.VERSION.SDK_INT >= 30) {
                 BiometricManager bm = (BiometricManager) getContext().getSystemService(Context.BIOMETRIC_SERVICE);
-                out.put("biometricCanAuthenticate", bm == null ? "UNAVAILABLE" : bm.canAuthenticate(BiometricManager.BIOMETRIC_WEAK));
+                out.put("biometricCanAuthenticate", bm == null ? "UNAVAILABLE" : bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK));
             } else {
                 out.put("biometricCanAuthenticate", "UNSUPPORTED_API_LEVEL");
             }
