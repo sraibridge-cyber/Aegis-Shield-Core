@@ -385,6 +385,75 @@ jobs:
           else
             echo "GATE NOT MEASURED: aapt2 unavailable, so the packaged package name was not read"
           fi
+          echo "--- web asset integrity: what the APK actually ships ---"
+          set +e
+          python3 - <<'PYEOF'
+          import hashlib, os, re, sys, zipfile
+          apk = 'cap/android/app/build/outputs/apk/debug/app-debug.apk'
+          src = 'cap/www'
+          zf = zipfile.ZipFile(apk)
+          names = [n for n in zf.namelist() if not n.endswith('/')]
+          html = [n for n in names if n.rsplit('/', 1)[-1] == 'index.html']
+          if not html:
+              print('GATE FAIL: the APK contains no index.html, so the installed app would open a blank or error shell')
+              sys.exit(3)
+          pref = ''
+          for root in ['assets/public/', 'public/']:
+              if [n for n in html if n.startswith(root)]:
+                  pref = root
+                  break
+          if not pref:
+              deepest = max(html, key=lambda n: n.count('/'))
+              pref = deepest.rsplit('/', 1)[0] + '/'
+          print('web root inside the APK: ' + pref)
+          if len(html) > 1:
+              print('note: %d index.html entries present; evaluating %s' % (len(html), pref))
+          packed = {}
+          for n in names:
+              if not n.startswith(pref):
+                  continue
+              rel = n[len(pref):]
+              if not rel:
+                  continue
+              packed[rel] = hashlib.sha256(zf.read(n)).hexdigest()
+          staged = {}
+          for base, _dirs, files in os.walk(src):
+              for f in files:
+                  full = os.path.join(base, f)
+                  rel = os.path.relpath(full, src).replace(os.sep, '/')
+                  with open(full, 'rb') as fh:
+                      staged[rel] = hashlib.sha256(fh.read()).hexdigest()
+          print('staged files: %d | packaged web files: %d' % (len(staged), len(packed)))
+          missing = sorted(set(staged) - set(packed))
+          differing = sorted(k for k in staged if k in packed and staged[k] != packed[k])
+          extra = sorted(set(packed) - set(staged))
+          if missing:
+              print('GATE FAIL: staged but absent from the APK: ' + ', '.join(missing[:10]))
+          if differing:
+              print('GATE FAIL: content differs between cap/www and the APK: ' + ', '.join(differing[:10]))
+          if extra:
+              print('note: packaged files not staged from cap/www (informational, not a failure): ' + ', '.join(extra[:10]))
+          if missing or differing:
+              sys.exit(4)
+          entry = None
+          with open(os.path.join(src, 'index.html'), 'r', encoding='utf-8', errors='replace') as fh:
+              m = re.search(r'assets/index-[A-Za-z0-9_-]+[.]js', fh.read())
+              entry = m.group(0) if m else None
+          if entry is None:
+              print('GATE NOT MEASURED: cap/www/index.html names no entry bundle matching assets/index-*.js')
+          elif entry not in packed:
+              print('GATE FAIL: index.html loads ' + entry + ' but that file is not inside the APK')
+              sys.exit(5)
+          else:
+              print('GATE OK: the APK ships ' + entry + ' with sha256 ' + packed[entry])
+          print('GATE OK: every staged web asset is present inside the APK and byte-identical (%d files)' % len(staged))
+          PYEOF
+          WEB_RC=$?
+          set -e
+          if [ "$WEB_RC" -ne 0 ]; then
+            echo "::error::The APK does not carry the staged web bundle; refusing to publish an app that would open blank."
+            fail=1
+          fi
           if [ "$fail" -ne 0 ]; then
             echo "::error::Gate failed; nothing will be published."
             echo "GATE RESULT: FAIL"
@@ -428,6 +497,7 @@ jobs:
           test -f "$APK"
           test -f "$SUM"
           test -n "${APK_HASH:-}"
+          NONREPRO="Builds are not bit-reproducible: identical app sources can produce different bytes, so this sha256 identifies the published file and does not prove it can be rebuilt from this commit."
           echo "this build: $APK_SIZE bytes, sha256 $APK_HASH"
           LIVE_STAMP=""
           PREV_RECORDED_SHA=""
@@ -486,14 +556,14 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$APK" "$SUM" --clobber
           else
-            gh release create "$TAG" "$APK" "$SUM" --target "$GITHUB_SHA" --prerelease --title "AEGIS debug APK $STAMP" --notes "Debug-signed APK built from $GITHUB_SHA by workflow run $GITHUB_RUN_ID. sha256 $APK_HASH, $APK_SIZE bytes. This is the permanent record for this build: apk-latest moves on to later builds, this tag does not."
+            gh release create "$TAG" "$APK" "$SUM" --target "$GITHUB_SHA" --prerelease --title "AEGIS debug APK $STAMP" --notes "Debug-signed APK built from $GITHUB_SHA by workflow run $GITHUB_RUN_ID. sha256 $APK_HASH, $APK_SIZE bytes. This is the permanent record for this build: apk-latest moves on to later builds, this tag does not. ${NONREPRO}"
           fi
           echo "ARCHIVED: $TAG"
           if gh release view apk-latest >/dev/null 2>&1; then
             gh release upload apk-latest "$APK" "$SUM" --clobber
-            gh release edit apk-latest --title "AEGIS debug APK (latest build, built $STAMP)" --notes "AUTHORITATIVE BUILD TIME: $STAMP. Git commit: $GITHUB_SHA. Workflow run: $GITHUB_RUN_ID. Web assets are bundled inside the APK, so it works offline. The debug signature identifies no publisher. sha256 $APK_HASH, $APK_SIZE bytes. NOTE: this release is updated in place, so GitHub's published date is when it was first published and does not move when the asset is replaced; that date is older than this binary. The build time in this title is authoritative. The apk-latest tag is moved to the build commit on every publish, so cloning at that tag returns the source this binary was built from."
+            gh release edit apk-latest --title "AEGIS debug APK (latest build, built $STAMP)" --notes "AUTHORITATIVE BUILD TIME: $STAMP. Git commit: $GITHUB_SHA. Workflow run: $GITHUB_RUN_ID. Web assets are bundled inside the APK, so it works offline. The debug signature identifies no publisher. sha256 $APK_HASH, $APK_SIZE bytes. NOTE: this release is updated in place, so GitHub's published date is when it was first published and does not move when the asset is replaced; that date is older than this binary. The build time in this title is authoritative. The apk-latest tag is moved to the build commit on every publish, so cloning at that tag returns the source this binary was built from. ${NONREPRO}"
           else
-            gh release create apk-latest "$APK" "$SUM" --target $GITHUB_SHA --title "AEGIS debug APK (latest build, built $STAMP)" --notes "AUTHORITATIVE BUILD TIME: $STAMP. Git commit: $GITHUB_SHA. Workflow run: $GITHUB_RUN_ID. Web assets are bundled inside the APK, so it works offline. The debug signature identifies no publisher. sha256 $APK_HASH, $APK_SIZE bytes. This release was created together with this binary, so its published date is accurate."
+            gh release create apk-latest "$APK" "$SUM" --target $GITHUB_SHA --title "AEGIS debug APK (latest build, built $STAMP)" --notes "AUTHORITATIVE BUILD TIME: $STAMP. Git commit: $GITHUB_SHA. Workflow run: $GITHUB_RUN_ID. Web assets are bundled inside the APK, so it works offline. The debug signature identifies no publisher. sha256 $APK_HASH, $APK_SIZE bytes. This release was created together with this binary, so its published date is accurate. ${NONREPRO}"
           fi
           mkdir -p verify
           gh release download apk-latest --pattern app-debug.apk --dir verify --clobber
