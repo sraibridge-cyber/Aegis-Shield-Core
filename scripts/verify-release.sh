@@ -64,8 +64,18 @@ else
     || die "the GitHub API returned no metadata for tag '$TAG' (a tag that does not exist, an exhausted unauthenticated rate limit, and a network failure all land here)"
 fi
 
-APK_URL="$(grep -oE '"browser_download_url": *"[^"]*app-debug\.apk"' "$TMP/release.json" | head -n1 | sed -E 's/.*"(https:[^"]+)".*/\1/')"
-SUM_URL="$(grep -oE '"browser_download_url": *"[^"]*app-debug\.apk\.sha256"' "$TMP/release.json" | head -n1 | sed -E 's/.*"(https:[^"]+)".*/\1/')"
+# A missing match must not become a silent exit. Under `set -e` + `pipefail` a bare
+# assignment from a failing pipeline aborts the script with no message at all, which
+# would leave the two `die` guards below unreachable and hand the reader a non-zero
+# status with nothing said. This helper always succeeds and always prints, so a release
+# that publishes no asset reaches those guards and is told why.
+asset_url() {
+  local frag="$1" file="$2" hits
+  hits="$(grep -oE "\"browser_download_url\": *\"[^\"]*${frag}\"" "$file" 2>/dev/null || true)"
+  printf '%s\n' "$hits" | sed -n -E 's/.*"(https:[^"]+)".*/\1/p' | head -n1 || true
+}
+APK_URL="$(asset_url 'app-debug\.apk' "$TMP/release.json")"
+SUM_URL="$(asset_url 'app-debug\.apk\.sha256' "$TMP/release.json")"
 
 [ -n "$APK_URL" ] || die "release '$TAG' publishes no app-debug.apk asset"
 [ -n "$SUM_URL" ] || die "release '$TAG' publishes no app-debug.apk.sha256 asset, so its download cannot be checked by the documented procedure"
@@ -73,7 +83,16 @@ SUM_URL="$(grep -oE '"browser_download_url": *"[^"]*app-debug\.apk\.sha256"' "$T
 curl -fsSL --retry 2 "$APK_URL" -o "$TMP/app-debug.apk" || die "the published app-debug.apk did not download"
 curl -fsSL --retry 2 "$SUM_URL" -o "$TMP/app-debug.apk.sha256" || die "the published app-debug.apk.sha256 did not download"
 
+# `wc -l` counts newline characters, so a sidecar whose last line carries no trailing
+# newline is undercounted by one and then rejected by a message that misdescribes it.
+# Count a final unterminated line too, and name an empty sidecar as what it is.
+if [ ! -s "$TMP/app-debug.apk.sha256" ]; then
+  die "the published app-debug.apk.sha256 is empty, so it records no digest and no download can be checked against it"
+fi
 LINES="$(wc -l < "$TMP/app-debug.apk.sha256" | tr -d ' ')"
+if [ -n "$(tail -c 1 "$TMP/app-debug.apk.sha256" | tr -d '\n')" ]; then
+  LINES="$((LINES + 1))"
+fi
 NAME="$(awk 'NR==1{print $2}' "$TMP/app-debug.apk.sha256")"
 DIGEST_FIELD="$(awk 'NR==1{print $1}' "$TMP/app-debug.apk.sha256")"
 BYTES_FIELD="$(awk 'NR==2{print $1}' "$TMP/app-debug.apk.sha256")"
