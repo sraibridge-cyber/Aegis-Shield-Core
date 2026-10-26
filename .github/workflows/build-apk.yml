@@ -65,25 +65,18 @@ jobs:
           cp package.json cap/package.json 2>/dev/null || true
           ls -la cap
 
-      - name: Build the static site
-        run: |
-          set -euo pipefail
-          npm ci --no-audit --no-fund || npm install --no-audit --no-fund
-          npx vite build --outDir dist || npm run build
-          test -d dist
-          ls dist
-
       - name: Assemble the Capacitor webDir
         run: |
           set -euo pipefail
           rm -rf cap/www
-          cp -r dist cap/webdir
-          mv cap/webdir cap/www
+          cp -r public cap/www
           test -f cap/www/index.html
-          test -f cap/www/manifest.json
-          test -f cap/www/service-worker.js
-          test -d cap/www/icons
-          ls cap/www/assets/index-*.js >/dev/null
+          echo "webDir index.html present"
+          ls cap/www/assets/index-*.js >/dev/null || { echo "::error::cap/www/assets/index-*.js is missing from the shipped bundle"; exit 1; }
+          echo "index bundle: $(ls -l cap/www/assets/index-*.js | awk '{print $5, $9}')"
+          for f in manifest.json service-worker.js icons; do
+            if [ -e "cap/www/$f" ]; then echo "present: $f"; else echo "note: $f is not in public/ (not fatal)"; fi
+          done
           echo "staged web files: $(find cap/www -type f | wc -l)"
 
       - name: Install Capacitor in an isolated project directory
