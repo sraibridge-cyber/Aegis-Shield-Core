@@ -47,7 +47,7 @@ jobs:
           for g in native/plugins/aegis-keystore/android/build.gradle native/plugins/hull-telemetry/android/build.gradle; do
             for need in com.android.library namespace; do
               if grep -q "$need" "$g"; then
-                echo "PLUGIN PREREQ OK: $g declares $need"
+                echo "PLUGIN PREREQT OK: $g declares $need"
               else
                 echo "::error::$g is missing $need; the build would fail with an opaque Gradle error."
                 exit 1
@@ -67,17 +67,18 @@ jobs:
 
       - name: Assemble the Capacitor webDir
         run: |
-          set -euo pipefail
           rm -rf cap/www
-          cp -r public cap/www
-          test -f cap/www/index.html
-          echo "webDir index.html present"
+          mkdir -p cap/www
+          cp index.html cap/www/index.html
+          cp -r public/. cap/www/
+          test -f cap/www/index.html || { echo "::error::cap/www/index.html is missing - the repo-root index.html was not copied"; exit 1; }
           ls cap/www/assets/index-*.js >/dev/null || { echo "::error::cap/www/assets/index-*.js is missing from the shipped bundle"; exit 1; }
-          echo "index bundle: $(ls -l cap/www/assets/index-*.js | awk '{print $5, $9}')"
-          for f in manifest.json service-worker.js icons; do
-            if [ -e "cap/www/$f" ]; then echo "present: $f"; else echo "note: $f is not in public/ (not fatal)"; fi
-          done
-          echo "staged web files: $(find cap/www -type f | wc -l)"
+          ref=$(grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' index.html | head -n1 || true)
+          if [ -n "$ref" ]; then test -f "cap/www/$ref" || { echo "::error::index.html references $ref but that file is not in the packaged webDir"; exit 1; }; echo "entry bundle referenced by index.html: $ref"; fi
+          test -f cap/www/manifest.json || { echo "::error::cap/www/manifest.json is missing"; exit 1; }
+          test -f cap/www/service-worker.js || echo "::warning::cap/www/service-worker.js is missing"
+          echo "ASSEMBLED cap/www:"; ls -la cap/www
+          echo "asset count: $(ls cap/www/assets | wc -l)"
 
       - name: Install Capacitor in an isolated project directory
         working-directory: cap
@@ -87,9 +88,9 @@ jobs:
       - name: Add the Android platform
         working-directory: cap
         run: |
-          npx cap init AEGIS com.aegis.shield --web-dir=www
-          npx cap add android
-          npx cap sync android
+          nx cap init AEGIS com.aegis.shield --web-dir=www
+          nx cap add android
+          nx cap sync android
 
       - name: Overlay the repo's native plugin modules and wire them into Gradle
         run: |
@@ -138,7 +139,7 @@ jobs:
             echo '<manifest xmlns:android="http://schemas.android.com/apk/res/android"'
             echo '    xmlns:tools="http://schemas.android.com/tools">'
             echo '    <uses-permission android:name="android.permission.INTERNET" />'
-            echo '    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"'
+            echo '    <uses-permission android:name="android.permission.BLUETOOTH_SCAN'
             echo '        android:usesPermissionFlags="neverForLocation" />'
             echo '    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />'
             echo '    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />'
