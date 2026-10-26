@@ -366,7 +366,7 @@ public class HullTelemetryPlugin extends Plugin {
                     : event.sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD ? "magnetometer" : "rotationVector";
                 JSObject s = new JSObject();
                 JSArray vals = new JSArray();
-                for (float f : event.values) vals.put(f);
+                for (float f : event.values) { try { vals.put(f); } catch (Exception ignored) { } }
                 s.put("values", vals);
                 s.put("elapsedRealtimeNanos", event.timestamp);
                 samples.put(key, s);
@@ -520,7 +520,7 @@ public class HullTelemetryPlugin extends Plugin {
         }, BLE_WINDOW_MS);
         try { latch.await(BLE_WINDOW_MS + 500, TimeUnit.MILLISECONDS); } catch (InterruptedException ignored) { }
         java.util.Iterator<String> seenKeys = seen.keys();
-        while (seenKeys.hasNext()) { String k = seenKeys.next(); ads.put(seen.get(k)); }
+        while (seenKeys.hasNext()) { String k = seenKeys.next(); try { ads.put(seen.get(k)); } catch (Exception ignored) { } }
         JSObject out = new JSObject();
         out.put("advertisements", ads);
         out.put("count", ads.length());
