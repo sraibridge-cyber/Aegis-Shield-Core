@@ -1,6 +1,6 @@
 # Native Android wrapper
 
-This directory is a minimal Capacitor 7 wrapper for the AEGIS web build. It bundles the static web assets into an Android app. It is configuration only: no APK is included in this repository.
+This directory is a minimal Capacitor 6 wrapper for the AEGIS web build. It bundles the static web assets into an Android app. It is configuration only: no APK is included in this repository.
 
 ## Local build
 
@@ -17,6 +17,10 @@ cd android && ./gradlew assembleDebug
 The debug APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`.
 
 `npm run sync-web` copies the repository's actual web bundle (`../index.html` plus `../public/`) into `./www`. There is no `dist/` in this tree.
+
+## Version pin
+
+`.github/workflows/build-apk.yml` installs `@capacitor/core`, `@capacitor/cli`, `@capacitor/android` and `@capacitor-community/bluetooth-le` at major 6 in an isolated build directory, then asserts every `@capacitor` package declared in `native/package.json` against the major it actually installed. The declarations in this directory therefore have to stay on 6: bumping one without the other fails the build rather than shipping an APK this repository does not describe. The APK registers exactly three plugin classpaths — `BluetoothLe`, `AegisKeystorePlugin` and `HullTelemetryPlugin` — so a plugin declared here but not registered there is not in the shipped APK.
 
 ## Limits
 

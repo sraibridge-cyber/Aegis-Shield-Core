@@ -89,6 +89,54 @@ jobs:
         run: |
           npm install --no-audit --no-fund --legacy-peer-deps @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor-community/bluetooth-le@6
 
+      - name: Assert the Capacitor majors this build installs match native/package.json
+        working-directory: cap
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const declPath = path.join(process.env.GITHUB_WORKSPACE, 'native', 'package.json');
+          if (!fs.existsSync(declPath)) {
+            console.error('::error::native/package.json is absent, so the wrapper version this repository declares cannot be checked against this build');
+            process.exit(1);
+          }
+          const decl = JSON.parse(fs.readFileSync(declPath, 'utf8'));
+          const wanted = Object.assign({}, decl.dependencies || {}, decl.devDependencies || {});
+          const pkgs = Object.keys(wanted).filter((k) => k.indexOf('@capacitor') === 0);
+          if (pkgs.length === 0) {
+            console.error('::error::native/package.json declares no @capacitor package, so there is nothing to check this build against');
+            process.exit(1);
+          }
+          const major = (spec) => {
+            const m = String(spec).match(/([0-9]+)/);
+            return m ? Number(m[1]) : null;
+          };
+          let bad = 0;
+          for (const p of pkgs) {
+            const pj = path.join('node_modules', p, 'package.json');
+            if (!fs.existsSync(pj)) {
+              console.error('CAPACITOR FAIL: ' + p + ' is declared in native/package.json (' + wanted[p] + ') but this build does not install it, so a local build of the wrapper and this APK would not carry the same plugin surface');
+              bad = 1;
+              continue;
+            }
+            const got = JSON.parse(fs.readFileSync(pj, 'utf8')).version;
+            const want = major(wanted[p]);
+            const have = major(got);
+            if (want === null || have === null) {
+              console.error('CAPACITOR FAIL: no readable major version for ' + p + ' (declared ' + wanted[p] + ', installed ' + got + ')');
+              bad = 1;
+            } else if (want !== have) {
+              console.error('CAPACITOR FAIL: native/package.json declares ' + p + ' ' + wanted[p] + ' (major ' + want + ') but this build installed ' + got + ' (major ' + have + '). The wrapper the repository declares and the wrapper this APK is built from must be the same major, or the APK is not the artifact the repository describes.');
+              bad = 1;
+            } else {
+              console.log('CAPACITOR OK: ' + p + ' ' + got + ' is at the major ' + want + ' declared in native/package.json');
+            }
+          }
+          if (bad !== 0) { process.exit(1); }
+          console.log('CAPACITOR OK: all ' + pkgs.length + ' @capacitor packages declared in native/package.json are installed at the declared major');
+          NODE
+
       - name: Add the Android platform
         working-directory: cap
         run: |
