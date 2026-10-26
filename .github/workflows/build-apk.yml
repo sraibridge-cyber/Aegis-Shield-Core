@@ -409,9 +409,9 @@ jobs:
           echo "ARCHIVED: $TAG"
           if gh release view apk-latest >/dev/null 2>&1; then
             gh release upload apk-latest "$APK" "$SUM" --clobber
-            gh release edit apk-latest --title "AEGIS debug APK (latest build)" --notes "Debug-signed APK built from $GITHUB_SHA by workflow run $GITHUB_RUN_ID. Web assets are bundled inside the APK, so it works offline. The debug signature identifies no publisher. sha256 $APK_HASH, $APK_SIZE bytes."
+            gh release edit apk-latest --title "AEGIS debug APK (latest build, built $STAMP)" --notes "AUTHORITATIVE BUILD TIME: $STAMP. Git commit: $GITHUB_SHA. Workflow run: $GITHUB_RUN_ID. Web assets are bundled inside the APK, so it works offline. The debug signature identifies no publisher. sha256 $APK_HASH, $APK_SIZE bytes. NOTE: GitHub reports this release's published date as the moment the apk-latest tag was first created; it does not change when the asset is replaced, so that date is older than this binary. The build time in this title is authoritative."
           else
-            gh release create apk-latest "$APK" "$SUM" --target $GITHUB_SHA --title "AEGIS debug APK (latest build)" --notes "Debug-signed APK built from $GITHUB_SHA by workflow run $GITHUB_RUN_ID. sha256 $APK_HASH, $APK_SIZE bytes."
+            gh release create apk-latest "$APK" "$SUM" --target $GITHUB_SHA --title "AEGIS debug APK (latest build, built $STAMP)" --notes "AUTHORITATIVE BUILD TIME: $STAMP. Git commit: $GITHUB_SHA. Workflow run: $GITHUB_RUN_ID. sha256 $APK_HASH, $APK_SIZE bytes."
           fi
           mkdir -p verify
           gh release download apk-latest --pattern app-debug.apk --dir verify --clobber
