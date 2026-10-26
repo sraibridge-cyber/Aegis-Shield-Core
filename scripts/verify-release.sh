@@ -5,9 +5,21 @@
 # The install page tells a visitor to download app-debug.apk and compare it with the
 # app-debug.apk.sha256 asset published next to it. That instruction is only worth
 # something if the comparison can be reproduced by someone who trusts neither the page
-# nor this repository. This script performs exactly that comparison and nothing else: it
-# reads the two public asset URLs out of the GitHub release metadata, checks that the
-# sidecar is a file sha256sum can read, and runs sha256sum -c against the binary.
+# nor this repository. This script performs that comparison and nothing else: it reads
+# the two asset URLs out of the public release metadata, checks that the digest the
+# sidecar records is the digest of the binary, and runs sha256sum -c wherever that
+# command can actually read the sidecar.
+#
+# Two sidecar formats exist in this project's history, and this script reads both.
+# Releases published after the checksum-format fix carry one bare digest line,
+# "<hash>  app-debug.apk", which sha256sum -c reads directly. Releases published before
+# it carry a legacy two-line form, "sha256:<hash>  app-debug.apk" followed by
+# "bytes:<n>", which sha256sum -c rejects outright. For a legacy release this script
+# compares the recorded digest against the downloaded binary directly, checks the
+# recorded byte count against the published size, and states that the documented
+# one-command check does not apply to that release. It never treats a sidecar as
+# verified because its shape looked familiar: a legacy digest still has to equal the
+# digest of the bytes, and the byte record still has to match the bytes.
 #
 # What a pass establishes:
 # The bytes you downloaded are the bytes the release records.
@@ -63,32 +75,62 @@ curl -fsSL --retry 2 "$SUM_URL" -o "$TMP/app-debug.apk.sha256" || die "the publi
 
 LINES="$(wc -l < "$TMP/app-debug.apk.sha256" | tr -d ' ')"
 NAME="$(awk 'NR==1{print $2}' "$TMP/app-debug.apk.sha256")"
-RECORDED="$(awk 'NR==1{print $1}' "$TMP/app-debug.apk.sha256")"
+DIGEST_FIELD="$(awk 'NR==1{print $1}' "$TMP/app-debug.apk.sha256")"
+BYTES_FIELD="$(awk 'NR==2{print $1}' "$TMP/app-debug.apk.sha256")"
+APK_BYTES="$(wc -c < "$TMP/app-debug.apk" | tr -d ' ')"
 
-say "apk bytes  : $(wc -c < "$TMP/app-debug.apk" | tr -d ' ')"
-say "sidecar    : $LINES line(s), filename field '${NAME:-EMPTY}', digest field '${RECORDED:-EMPTY}'"
+# The digest field is the first token of line 1. A leading "sha256:" marks the legacy
+# format; it is stripped so the comparison below is against the digest itself, never
+# against a prefixed string that could never equal a computed hash.
+FORMAT="bare"
+RECORDED="$DIGEST_FIELD"
+case "$DIGEST_FIELD" in
+  sha256:*) FORMAT="legacy" ; RECORDED="${DIGEST_FIELD#sha256:}" ;;
+esac
 
-if [ "$LINES" != "1" ]; then
-  die "the sidecar has $LINES lines. sha256sum -c reads exactly one digest line, so this release records a checksum no reader can check. The APK may still be intact; the record is not usable."
-fi
-if [ "$NAME" != "app-debug.apk" ]; then
-  die "the sidecar names '${NAME:-EMPTY}' instead of app-debug.apk, so sha256sum -c would look for a file that was never downloaded."
-fi
+say "apk bytes  : $APK_BYTES"
+say "sidecar    : $FORMAT format, $LINES line(s), filename field '${NAME:-EMPTY}'"
+say "digest     : ${RECORDED:-EMPTY}"
+
+case "$FORMAT" in
+  bare)
+    [ "$LINES" = "1" ] || die "the sidecar has $LINES lines with no 'sha256:' prefix, so it is neither the one-line format sha256sum -c reads nor the two-line legacy format this script knows"
+    ;;
+  legacy)
+    [ "$LINES" = "2" ] || die "the sidecar begins with a 'sha256:' prefix but has $LINES line(s), not the two lines the legacy format emits"
+    case "${BYTES_FIELD:-}" in
+      bytes:[0-9]*) : ;;
+      *) die "the legacy sidecar's second line is '${BYTES_FIELD:-EMPTY}', not a 'bytes:<n>' record, so its byte count cannot be checked" ;;
+    esac
+    RECORDED_BYTES="${BYTES_FIELD#bytes:}"
+    if [ "$RECORDED_BYTES" != "$APK_BYTES" ]; then
+      die "the legacy sidecar records $RECORDED_BYTES bytes but the published APK is $APK_BYTES bytes. The pair does not describe one another."
+    fi
+    say "bytes record: $RECORDED_BYTES, matching the published APK"
+    ;;
+esac
+
+[ "$NAME" = "app-debug.apk" ] || die "the sidecar names '${NAME:-EMPTY}' instead of app-debug.apk, so it describes a file other than the one this release publishes"
 case "$RECORDED" in
   *[!0-9a-f]*|'') die "the sidecar's digest field '${RECORDED:-EMPTY}' is not lowercase hexadecimal" ;;
 esac
-if [ "${#RECORDED}" != "64" ]; then
-  die "the sidecar's digest field is ${#RECORDED} characters, not 64"
-fi
+[ "${#RECORDED}" = "64" ] || die "the sidecar's digest field is ${#RECORDED} characters, not 64"
 
 GOT="$(sha256sum "$TMP/app-debug.apk" | cut -d' ' -f1)"
 say "computed   : $GOT"
 
-if ! ( cd "$TMP" && sha256sum -c app-debug.apk.sha256 >/dev/null 2>&1 ); then
-  die "sha256sum -c rejects the published pair. The recorded digest and the published binary disagree, or the sidecar is not in the format that tool reads."
-fi
 if [ "$GOT" != "$RECORDED" ]; then
-  die "sha256sum -c passed but the recorded digest '$RECORDED' is not the computed digest '$GOT'"
+  die "the published sidecar records digest '$RECORDED' but the published APK hashes to '$GOT'. The pair does not describe one another."
+fi
+
+if [ "$FORMAT" = "bare" ]; then
+  ( cd "$TMP" && sha256sum -c app-debug.apk.sha256 >/dev/null 2>&1 ) \
+    || die "the digest matches, but sha256sum -c still rejects the sidecar, so the documented one-command check does not work on this release"
+  say "sha256sum  : -c accepts the published sidecar"
+else
+  say "sha256sum  : NOT APPLICABLE - this release predates the sidecar format fix, so"
+  say "             'sha256sum -c' rejects its sidecar even though the digest above"
+  say "             matches. Verified here by direct comparison instead."
 fi
 
 say "RESULT     : MATCH - the published sidecar describes the published binary"
