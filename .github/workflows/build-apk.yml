@@ -123,6 +123,16 @@ jobs:
             }
             fs.writeFileSync(app, s);
           }
+          const pluginDeps = ['aegis-keystore', 'hull-telemetry'];
+          for (const id of pluginDeps) {
+            const g = 'cap/native/plugins/' + id + '/android/build.gradle';
+            if (!fs.existsSync(g)) continue;
+            let t = fs.readFileSync(g, 'utf8');
+            if (t.includes("project(':capacitor-android')")) continue;
+            t += "\ndependencies {\n    implementation project(':capacitor-android')\n}\n";
+            fs.writeFileSync(g, t);
+            console.log('patched :capacitor-android dependency into ' + id);
+          }
           console.log('gradle wiring written');
           NODE
           echo "--- settings.gradle ---"
@@ -134,49 +144,53 @@ jobs:
         run: |
           set -euo pipefail
           MANIFEST=cap/android/app/src/main/AndroidManifest.xml
-          {
-            echo '<?xml version="1.0" encoding="utf-8"?>'
-            echo '<manifest xmlns:android="http://schemas.android.com/apk/res/android"'
-            echo '    xmlns:tools="http://schemas.android.com/tools">'
-            echo '    <uses-permission android:name="android.permission.INTERNET" />'
-            echo '    <uses-permission android:name="android.permission.BLUETOOTH_SCAN'
-            echo '        android:usesPermissionFlags="neverForLocation" />'
-            echo '    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />'
-            echo '    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />'
-            echo '    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />'
-            echo '    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" tools:node="remove" />'
-            echo '    <application'
-            echo '        android:allowBackup="false"'
-            echo '        android:fullBackupContent="false"'
-            echo '        android:icon="@mipmap/ic_launcher"'
-            echo '        android:label="@string/app_name"'
-            echo '        android:roundIcon="@mipmap/ic_launcher_round"'
-            echo '        android:supportsRtl="true"'
-            echo '        android:theme="@style/AppTheme">'
-            echo '        <activity'
-            echo '            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"'
-            echo '            android:name=".MainActivity"'
-            echo '            android:label="@string/title_activity_main"'
-            echo '            android:theme="@style/AppTheme.NoActionBarLaunch"'
-            echo '            android:launchMode="singleTask"'
-            echo '            android:exported="true">'
-            echo '            <intent-filter>'
-            echo '                <action android:name="android.intent.action.MAIN" />'
-            echo '                <category android:name="android.intent.category.LAUNCHER" />'
-            echo '            </intent-filter>'
-            echo '        </activity>'
-            echo '        <provider'
-            echo '            android:name="androidx.core.content.FileProvider"'
-            echo '            android:authorities="${applicationId}.fileprovider"'
-            echo '            android:exported="false"'
-            echo '            android:grantUriPermissions="true">'
-            echo '            <meta-data'
-            echo '                android:name="androidx.core.content.FileProvider"'
-            echo '                android:resource="@xml/file_paths" />'
-            echo '        </provider>'
-            echo '    </application>'
-            echo '</manifest>'
-          } > "$MANIFEST"
+          cat > "$MANIFEST" <<'MANIFESTEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:tools="http://schemas.android.com/tools">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+                  android:usesPermissionFlags="neverForLocation" />
+              <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+              <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+              <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" tools:node="remove" />
+              <application
+                  android:allowBackup="false"
+                  android:fullBackupContent="false"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="@string/app_name"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:supportsRtl="true"
+                  android:theme="@style/AppTheme">
+                  <activity
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+                      android:name=".MainActivity"
+                      android:label="@string/title_activity_main"
+                      android:theme="@style/AppTheme.NoActionBarLaunch"
+                      android:launchMode="singleTask"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          MANIFESTEOF
+          python3 - "$MANIFEST" <<'PYEOF'
+          import sys
+          import xml.etree.ElementTree as ET
+          path = sys.argv[1]
+          try:
+              ET.parse(path)
+          except Exception as exc:
+              print("::error::the generated AndroidManifest.xml is not well-formed: %s" % exc)
+              raise SystemExit(1)
+          print("MANIFEST OK: %s parses as well-formed XML" % path)
+          PYEOF
+          echo "--- permission declarations ---"
+          grep -n "uses-permission" "$MANIFEST"
           node <<'NODE'
           const fs = require('fs');
           const p = 'cap/android/app/src/main/assets/capacitor.plugins.json';
@@ -197,9 +211,7 @@ jobs:
           console.log('registered plugin classpaths:');
           for (const e of list) console.log('  ' + e.classpath);
           NODE
-          echo "--- manifest head ---"
-          head -n 12 "$MANIFEST"
-
+          echo "--- plugins.json written above ---"
       - name: Build the debug APK
         working-directory: cap/android
         run: |
@@ -276,45 +288,74 @@ jobs:
         run: |
           set -euo pipefail
           APK=cap/android/app/build/outputs/apk/debug/app-debug.apk
+          test -f "$APK"
           STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+          rm -rf dist
+          mkdir -p dist
+          cp "$APK" dist/app-debug.apk
+          APK_SIZE=$(stat -c%s dist/app-debug.apk)
+          APK_HASH=$(sha256sum dist/app-debug.apk | cut -d' ' -f1)
+          printf 'sha256:%s  app-debug.apk\nbytes:%s\n' "$APK_HASH" "$APK_SIZE" > dist/app-debug.apk.sha256
           echo "STAMP=$STAMP" >> "$GITHUB_ENV"
-          echo "APK_SIZE=$(stat -c%s "$APK")" >> "$GITHUB_ENV"
-          echo "APK_HASH=$(sha256sum "$APK" | cut -d' ' -f1)" >> "$GITHUB_ENV"
-          cp "$APK" aegis-app-debug.apk
-          echo "AEGIS debug APK" > app-debug.apk.sha256
-          printf 'sha256:%s  aegis-app-debug.apk\n' "$(sha256sum aegis-app-debug.apk | cut -d' ' -f1)" >> app-debug.apk.sha256
-          echo "size: $(cat "$GITHUB_ENV")"
-          cat app-debug.apk.sha256
-
+          echo "APK_SIZE=$APK_SIZE" >> "$GITHUB_ENV"
+          echo "APK_HASH=$APK_HASH" >> "$GITHUB_ENV"
+          ls -la dist
+          echo "PACKAGED: dist/app-debug.apk $APK_SIZE bytes sha256 $APK_HASH"
+          cat dist/app-debug.apk.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: aegis-debug-apk
           path: |
-            aegis-app-debug.apk
-            app-debug.apk.sha256
+            dist/app-debug.apk
+            dist/app-debug.apk.sha256
             gate-permissions.txt
-
-      - name: Publish without destroying the previous release
+      - name: Publish without destroying the copy that is live
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          TAG="apk-$STAMP"
-          gh release create "$TAG" aegis-app-debug.apk app-debug.apk.sha256 \
-            --target "$GITHUB_SHA" \
-            --title "AEGIS debug APK $STAMP" \
-            --notes "Debug-signed APK built from main by workflow run $GITHUB_RUN_ID. Web assets are bundled inside the APK, so it runs with the network off. The debug signature identifies no publisher. sha256 in app-debug.apk.sha256."
-          echo "archived build published as $TAG"
-          OLD_ID=$(gh release view apk-latest --json databaseId --jq .databaseId 2>/dev/null || true)
-          OLD_ASSETS=$(gh release view apk-latest --json assets --jq '.assets | length' 2>/dev/null || echo 0)
-          if [ -n "$OLD_ID" ]; then
-            echo "previous apk-latest release id $OLD_ID carries $OLD_ASSETS asset(s)"
-            gh release edit apk-latest --tag "apk-previous-$STAMP" --title "AEGIS debug APK (superseded $STAMP)"
-            echo "previous latest moved to apk-previous-$STAMP"
+          APK=dist/app-debug.apk
+          SUM=dist/app-debug.apk.sha256
+          test -f "$APK"
+          test -f "$SUM"
+          test -n "${APK_HASH:-}"
+          echo "this build: $APK_SIZE bytes, sha256 $APK_HASH"
+          if gh release view apk-latest >/dev/null 2>&1; then
+            mkdir -p prev
+            if gh release download apk-latest --pattern app-debug.apk --dir prev --clobber; then
+              PREV_HASH=$(sha256sum prev/app-debug.apk | cut -d' ' -f1)
+              PREV_SIZE=$(stat -c%s prev/app-debug.apk)
+              PREV_TAG="apk-prev-${PREV_HASH:0:12}"
+              if gh release view "$PREV_TAG" >/dev/null 2>&1; then
+                echo "PRESERVED ALREADY: $PREV_TAG (sha256 $PREV_HASH)"
+              else
+                printf 'sha256:%s  app-debug.apk\nbytes:%s\n' "$PREV_HASH" "$PREV_SIZE" > prev/app-debug.apk.sha256
+                gh release create "$PREV_TAG" prev/app-debug.apk prev/app-debug.apk.sha256 --prerelease --title "AEGIS debug APK - superseded build" --notes "Superseded build preserved verbatim for history. sha256 $PREV_HASH, $PREV_SIZE bytes. Not the current download; the current build is on apk-latest."
+                echo "PRESERVED: superseded build archived as $PREV_TAG (sha256 $PREV_HASH)"
+              fi
+            else
+              echo "::warning::apk-latest carries no app-debug.apk, so there was nothing to preserve"
+            fi
           fi
-          gh release create apk-latest aegis-app-debug.apk app-debug.apk.sha256 \
-            --target "$GITHUB_SHA" \
-            --title "AEGIS debug APK (latest build)" \
-            --notes "Debug-signed APK built from main by workflow run $GITHUB_RUN_ID. Web assets are bundled inside the APK, so it runs with the network off. The debug signature identifies no publisher. sha256 in app-debug.apk.sha256."
-          echo "apk-latest now serves the build from $GITHUB_SHA"
+          TAG="apk-$STAMP"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" "$SUM" --clobber
+          else
+            gh release create "$TAG" "$APK" "$SUM" --target "$GITHUB_SHA" --prerelease --title "AEGIS debug APK $STAMP" --notes "Debug-signed APK built from $GITHUB_SHA by workflow run $GITHUB_RUN_ID. sha256 $APK_HASH, $APK_SIZE bytes."
+          fi
+          echo "ARCHIVED: $TAG"
+          if gh release view apk-latest >/dev/null 2>&1; then
+            gh release upload apk-latest "$APK" "$SUM" --clobber
+            gh release edit apk-latest --title "AEGIS debug APK (latest build)" --notes "Debug-signed APK built from $GITHUB_SHA by workflow run $GITHUB_RUN_ID. Web assets are bundled inside the APK, so it works offline. The debug signature identifies no publisher. sha256 $APK_HASH, $APK_SIZE bytes."
+          else
+            gh release create apk-latest "$APK" "$SUM" --target $GITHUB_SHA --title "AEGIS debug APK (latest build)" --notes "Debug-signed APK built from $GITHUB_SHA by workflow run $GITHUB_RUN_ID. sha256 $APK_HASH, $APK_SIZE bytes."
+          fi
+          mkdir -p verify
+          gh release download apk-latest --pattern app-debug.apk --dir verify --clobber
+          GOT=$(sha256sum verify/app-debug.apk | cut -d' ' -f1)
+          if [ "$GOT" != "$APK_HASH" ]; then
+            echo "::error::apk-latest serves sha256 $GOT but the gated build is $APK_HASH"
+            exit 1
+          fi
+          echo "PUBLISH VERIFIED: apk-latest serves app-debug.apk sha256 $GOT"
