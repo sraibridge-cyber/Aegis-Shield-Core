@@ -511,7 +511,12 @@ jobs:
           cp "$APK" dist/app-debug.apk
           APK_SIZE=$(stat -c%s dist/app-debug.apk)
           APK_HASH=$(sha256sum dist/app-debug.apk | cut -d' ' -f1)
-          printf 'sha256:%s  app-debug.apk\nbytes:%s\n' "$APK_HASH" "$APK_SIZE" > dist/app-debug.apk.sha256
+          # Write the sidecar with the same tool that later verifies it. sha256sum emits exactly the
+          # "<digest>  <filename>" line its own -c mode consumes, so the published format cannot drift
+          # from the format a visitor is told to check. The size is already in the PACKAGED line below
+          # and in the release notes; it does not belong in a file named .sha256, where a second line
+          # makes sha256sum -c reject the entire file as unparseable.
+          ( cd dist && sha256sum app-debug.apk > app-debug.apk.sha256 )
           echo "STAMP=$STAMP" >> "$GITHUB_ENV"
           echo "APK_SIZE=$APK_SIZE" >> "$GITHUB_ENV"
           echo "APK_HASH=$APK_HASH" >> "$GITHUB_ENV"
@@ -575,7 +580,9 @@ jobs:
                 if [ -n "$HOLDER" ]; then
                   echo "PRESERVED ALREADY: $HOLDER holds sha256 $PREV_HASH; not storing a duplicate copy"
                 else
-                  printf 'sha256:%s  app-debug.apk\nbytes:%s\n' "$PREV_HASH" "$PREV_SIZE" > prev/app-debug.apk.sha256
+                  # Same reason as the current build's sidecar: an archived .sha256 must also be
+                  # consumable by sha256sum -c, or the preserved copy cannot be verified by anyone.
+                  ( cd prev && sha256sum app-debug.apk > app-debug.apk.sha256 )
                   if [ -n "$PREV_RECORDED_SHA" ]; then
                     gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" -f "ref=refs/tags/${PREV_TAG}" -f "sha=${PREV_RECORDED_SHA}" >/dev/null
                     echo "ATTRIBUTED: ${PREV_TAG} created at ${PREV_RECORDED_SHA}, the commit apk-latest itself recorded as the builder of this binary"
@@ -619,12 +626,31 @@ jobs:
           fi
           echo "PUBLISH VERIFIED: apk-latest serves app-debug.apk sha256 $GOT"
           gh release download apk-latest --pattern app-debug.apk.sha256 --dir verify --clobber
-          SUM_GOT=$(grep -oE '[0-9a-f]{64}' verify/app-debug.apk.sha256 | head -n1 || true)
+          SUM_GOT=$(cut -d' ' -f1 verify/app-debug.apk.sha256)
           if [ "$SUM_GOT" != "$APK_HASH" ]; then
             echo "::error::apk-latest serves app-debug.apk.sha256 recording ${SUM_GOT:-NO HASH} but the gated build is $APK_HASH, so the published checksum does not describe the published binary and anyone verifying the download would be misled"
             exit 1
           fi
-          echo "CHECKSUM VERIFIED: apk-latest serves app-debug.apk.sha256 recording $SUM_GOT, which matches the gated binary"
+          # A file named .sha256 has to be consumable by the tool of that name. Grepping for a 64-hex
+          # run only proved the number was present somewhere: the sidecar carried a "sha256:" prefix
+          # and a second "bytes:" line, so sha256sum -c rejected the whole file with "no properly
+          # formatted checksum lines found" and the verification the install page documents failed on
+          # an intact download. The gate now runs that exact command against the published asset.
+          SUM_LINES=$(wc -l < verify/app-debug.apk.sha256)
+          SUM_NAME=$(awk '{print $2}' verify/app-debug.apk.sha256)
+          if [ "$SUM_LINES" != "1" ]; then
+            echo "::error::apk-latest serves app-debug.apk.sha256 with $SUM_LINES line(s); a file sha256sum -c can read is exactly one digest line, so the documented verification cannot succeed even on an intact download"
+            exit 1
+          fi
+          if [ "$SUM_NAME" != "app-debug.apk" ]; then
+            echo "::error::apk-latest serves app-debug.apk.sha256 whose filename field is '${SUM_NAME:-EMPTY}' rather than app-debug.apk, so sha256sum -c would look for a file that was never downloaded and fail on an intact download"
+            exit 1
+          fi
+          if ! ( cd verify && sha256sum -c app-debug.apk.sha256 >/dev/null 2>&1 ); then
+            echo "::error::apk-latest serves app-debug.apk.sha256 that sha256sum -c cannot verify against the published app-debug.apk, so the checksum the install page tells a visitor to check is not usable"
+            exit 1
+          fi
+          echo "CHECKSUM VERIFIED: apk-latest serves app-debug.apk.sha256 recording $SUM_GOT, and sha256sum -c succeeds against the published binary - the exact check the install page documents"
           git tag -f apk-latest "$GITHUB_SHA"
           if ! git push --force origin refs/tags/apk-latest; then
             echo "::error::could not move the apk-latest tag ref to $GITHUB_SHA"
