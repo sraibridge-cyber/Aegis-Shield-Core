@@ -6,6 +6,8 @@ import { resetGuard, detectIdentityChange, persistProbe, muCoverageLabel, differ
 import { measureBackup, computeUnbacked } from "./backup-9f3c2a.js";
 import { scanRecovery, RECOVERY_TEXT } from "./recovery-9f3c2a.js";
 import { requestDeviceOptions, makeIdentity, identityLabel, resolveIdentity, makeObservation } from "./ble-9f3c2a.js";
+import { derToRaw, rawToDer, importSpkiVerifyKey, verifyRaw } from "./ecdsa-interop.js";
+import { AegisKeystoreWeb } from "./aegis-keystore-web.js";
 const h=React.createElement;
 const ZERO="0".repeat(64);
 const VECTOR="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
@@ -382,6 +384,56 @@ async function c41(){
   const ok=allOk&&namedOk&&servicesOk&&noSilent;
   return {status:ok?"pass":"fail",value:`all.acceptAllDevices=${all.acceptAllDevices}\nall.filters=${all.filters?"present":"absent"}\nnamed.filters=${JSON.stringify(named.filters)}\nnamed.acceptAllDevices=${named.acceptAllDevices}\noptionalServices=${all.optionalServices.join(",")}\nunknown mode falls back to acceptAllDevices=${fallback.acceptAllDevices}`};
 }
+const DER_VECTOR_HEX="30440220"+"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"+"0220"+"2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40";
+const RAW_VECTOR_HEX="0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"+"2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40";
+function hexToBytes(hex){const out=new Uint8Array(hex.length/2);for(let i=0;i<out.length;i++)out[i]=parseInt(hex.slice(i*2,i*2+2),16);return out;}
+function bytesEqual(a,b){if(a.length!==b.length)return false;for(let i=0;i<a.length;i++)if(a[i]!==b[i])return false;return true;}
+async function c42(){
+  try{
+    const der=hexToBytes(DER_VECTOR_HEX);
+    const raw=derToRaw(der);
+    const expected=hexToBytes(RAW_VECTOR_HEX);
+    const ok=bytesEqual(raw,expected);
+    return {status:ok?"pass":"fail",value:`derToRaw length=${raw.length}\nexpected length=${expected.length}\nfirst=${bytesToHex(raw.slice(0,8))}\nexpected=${bytesToHex(expected.slice(0,8))}`};
+  }catch(error){return {status:"fail",value:`derToRaw threw ${error.name||"Error"}: ${error.message||error}`};}
+}
+async function c43(){
+  try{
+    const der=hexToBytes(DER_VECTOR_HEX);
+    const round=rawToDer(derToRaw(der));
+    const ok=bytesEqual(round,der);
+    return {status:ok?"pass":"fail",value:`rawToDer(derToRaw(x)) length=${round.length}\noriginal length=${der.length}\nround-trip=${ok}`};
+  }catch(error){return {status:"fail",value:`round trip threw ${error.name||"Error"}: ${error.message||error}`};}
+}
+async function c44(){
+  const cases=[];
+  try{derToRaw(new Uint8Array([0x30]));cases.push("truncated:no-error");}catch(e){cases.push(`truncated:${e.code||e.name}`);}
+  try{const d=hexToBytes(DER_VECTOR_HEX);d[0]=0x31;derToRaw(d);cases.push("wrong-tag:no-error");}catch(e){cases.push(`wrong-tag:${e.code||e.name}`);}
+  try{derToRaw(hexToBytes("30450221"+"01".repeat(33)+"0220"+"21".repeat(32)));cases.push("too-long:no-error");}catch(e){cases.push(`too-long:${e.code||e.name}`);}
+  const ok=cases[0]==="truncated:TRUNCATED"&&cases[1]==="wrong-tag:WRONG_TAG"&&cases[2]==="too-long:INTEGER_TOO_LONG";
+  return {status:ok?"pass":"fail",value:cases.join("\n")};
+}
+async function c45(){
+  try{
+    const pair=await crypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"},true,["sign","verify"]);
+    const spki=new Uint8Array(await crypto.subtle.exportKey("spki",pair.publicKey));
+    const key=await importSpkiVerifyKey(spki);
+    const data=new TextEncoder().encode("aegis-ecdsa-interop-self-test");
+    const raw=new Uint8Array(await crypto.subtle.sign({name:"ECDSA",hash:"SHA-256"},pair.privateKey,data));
+    const ok=await verifyRaw(key,data,raw);
+    const tampered=new Uint8Array(raw);tampered[0]^=0xff;
+    const bad=await verifyRaw(key,data,tampered);
+    return {status:ok&&!bad?"pass":"fail",value:`raw length=${raw.length}\nverifyRaw=${ok}\ntampered=${bad}`};
+  }catch(error){return {status:"fail",value:`verifyRaw threw ${error.name||"Error"}: ${error.message||error}`};}
+}
+async function c46(){
+  try{
+    const stub=new AegisKeystoreWeb();
+    const results=[await stub.isAvailable(),await stub.generateKey({alias:"x"}),await stub.getPublicKeySpki({alias:"x"}),await stub.sign({alias:"x",dataBase64:"AA=="}),await stub.getKeyInfo({alias:"x"}),await stub.deleteKey({alias:"x"})];
+    const ok=results.every(r=>r.available===false&&r.reason==="NOT_A_NATIVE_BUILD")&&!results[3].signatureBase64;
+    return {status:ok?"pass":"fail",value:results.map(r=>`available=${r.available} reason=${r.reason}`).join("\n")};
+  }catch(error){return {status:"fail",value:`web stub threw ${error.name||"Error"}: ${error.message||error}`};}
+}
 const CHECKS=[
   {n:1,title:"Runtime & secure context",desc:"Reads isSecureContext, SubtleCrypto, origin and the service-worker controller.",run:c1},
   {n:2,title:"SHA-256 known-answer test",desc:"Hashes the ASCII string “abc” and compares it with the published vector.",run:c2},
@@ -423,7 +475,12 @@ const CHECKS=[
   {n:38,title:"BLE name-resolution precedence",desc:"Runs synthetic fixtures through advertised → gap-0x2A00 → UNNAMED and checks the label.",run:c38},
   {n:39,title:"BLE absent-characteristic tolerance",desc:"Runs a mock GATT that throws NotFoundError on 0x2A00 and checks the other characteristics still resolve.",run:c39},
   {n:40,title:"BLE identity honesty",desc:"Checks that no identity path writes a MAC and that nameSource stays in the three allowed values.",run:c40},
-  {n:41,title:"BLE discovery-mode wiring",desc:"Checks that the armed mode maps to acceptAllDevices or filters and that named-only is never silently substituted.",run:c41}
+  {n:41,title:"BLE discovery-mode wiring",desc:"Checks that the armed mode maps to acceptAllDevices or filters and that named-only is never silently substituted.",run:c41},
+  {n:42,title:"DER → raw known-answer",desc:"Converts a fixed DER signature to the expected 64-byte raw R||S and compares byte-for-byte.",run:c42},
+  {n:43,title:"raw ↔ DER round trip",desc:"Re-encodes the known raw signature and compares it with the original DER.",run:c43},
+  {n:44,title:"Malformed DER rejection",desc:"Checks truncated, wrong-tag, and over-long INTEGER inputs are rejected with named errors.",run:c44},
+  {n:45,title:"SPKI import + raw verify",desc:"Generates a WebCrypto P-256 keypair, signs, and verifies through the raw path.",run:c45},
+  {n:46,title:"Keystore web stub honesty",desc:"Checks every web-stub method reports available:false and never fabricates a signature.",run:c46}
 ];
 const COLORS={pass:"var(--phosphor)",fail:"var(--crimson)",info:"var(--smoke)",skip:"var(--smoke)",running:"var(--gold)",idle:"var(--smoke)"};
 const LABELS={pass:"PASS",fail:"FAIL",info:"MEASURED",skip:"NOT MEASURED",running:"RUNNING",idle:"NOT RUN"};
@@ -442,14 +499,14 @@ function mount(root){
   wrap.innerHTML=`<header>
     <p class="label" style="color:var(--gold)">SELF-TEST · LOCAL ONLY</p>
     <h1 style="margin:6px 0 0;font-size:22px;line-height:1.15;color:var(--chalk);letter-spacing:-.02em">End-to-end self-test</h1>
-    <p style="margin:8px 0 0;font-size:11px;line-height:1.6;color:var(--smoke)">Forty-one checks run in this browser and print measured values. The records created here are synthetic and never enter the evidence chain.</p>
+    <p style="margin:8px 0 0;font-size:11px;line-height:1.6;color:var(--smoke)">Forty-six checks run in this browser and print measured values. The records created here are synthetic and never enter the evidence chain.</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
-      <button id="st-run" type="button" style="${btnStyle()}">Run all 41</button>
+      <button id="st-run" type="button" style="${btnStyle()}">Run all 46</button>
       <button id="st-reset" type="button" style="${btnStyle()}">Reset</button>
     </div>
     <div class="panel" style="margin-top:14px;padding:12px">
       <p class="label" style="color:var(--smoke)">SUMMARY</p>
-      <p id="st-count" class="mono" style="margin:6px 0 0;font-size:13px;color:var(--chalk)">0 PASSED · 0 FAILED · 41 NOT MEASURED</p>
+      <p id="st-count" class="mono" style="margin:6px 0 0;font-size:13px;color:var(--chalk)">0 PASSED · 0 FAILED · 46 NOT MEASURED</p>
       <p id="st-net" class="mono" style="margin:4px 0 0;font-size:10px;color:var(--smoke)">network calls during run=0</p>
       <p style="margin:8px 0 0;font-size:10px;line-height:1.65;color:var(--smoke)">These checks verify that the primitives run on this device; they prove nothing about the device's trustworthiness or about whether the user is being observed.</p>
       <p style="margin:8px 0 0;font-size:10px;line-height:1.65;color:var(--smoke)">${LIMIT}</p>

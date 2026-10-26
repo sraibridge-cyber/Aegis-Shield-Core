@@ -1,0 +1,13 @@
+{
+  "appId": "ai.apptribe.vincen.techlab",
+  "appName": "Vincen",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "HullTelemetry": {
+      "enabled": true
+    }
+  }
+}

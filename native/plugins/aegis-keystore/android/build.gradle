@@ -1,0 +1,27 @@
+apply plugin: 'com.android.library'
+
+android {
+    namespace "io.aegis.keystore"
+    compileSdk 34
+
+    defaultConfig {
+        minSdk 23
+        targetSdk 34
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+dependencies {
+    implementation project(':capacitor-android')
+    implementation "androidx.appcompat:appcompat:1.7.0"
+    testImplementation "junit:junit:4.13.2"
+}

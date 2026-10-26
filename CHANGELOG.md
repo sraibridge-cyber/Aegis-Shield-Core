@@ -1,5 +1,54 @@
 # Changelog
 
+## 2026-10-26 — Segment 3: Hull Access native capability bridge
+
+**STATUS: written, not compiled.** No JVM, Gradle, Android SDK, or device was used. The `HullTelemetry` Java plugin has not been compiled or run.
+
+### Added
+
+- `native/plugins/hull-telemetry/` — Capacitor plugin package, TypeScript definitions, registration, web stub, Android build files, and `HullTelemetryPlugin.java`.
+- `src/lib/hull-bridge.ts` — typed client with the single envelope shape, capability groups, permission state, and local audit record.
+- `public/assets/hull-bridge.js` — runtime bridge and ACCESS surface; injects the capability board into `/wiring` and VITALS/ENVIRONMENT into `/nerve` without adding a nav destination.
+- `SEGMENT-3-HULL-ACCESS-REPORT.md` — what is written and verified, what is written but not compiled, what CI will prove, platform restrictions, and out-of-scope items.
+
+### Changed
+
+- `native/scripts/install-plugin.sh` — copies and registers both `AegisKeystorePlugin` and `HullTelemetryPlugin`.
+- `native/capacitor.config.json` — declares the `HullTelemetry` plugin.
+- `.github/workflows/android.yml` — step name now covers both plugins.
+- `index.html` — loads the runtime bridge after the app bundle.
+- `README.md` — capability and permission table; repo-vs-published divergence note.
+
+### Not executed
+
+- Java compilation, Gradle, APK/AAB, device tests, and the native permission flow were not run.
+
+## 2026-10-25 — Segment 2: Seal A hardware-backed key storage
+
+**STATUS: written, not compiled.** No JVM, Gradle, Android SDK, or device was used. The Java plugin and the DER conversion have not been compiled or run.
+
+### Added
+
+- `native/plugins/aegis-keystore/` — Capacitor plugin package, TypeScript definitions, registration, web stub, Android build files, `AegisKeystorePlugin.java`, `EcdsaDer.java`, and `EcdsaDerTest.java`.
+- `native/scripts/install-plugin.sh` — copies the plugin into the generated Android project and registers it in `MainActivity`.
+- `src/lib/ecdsa-interop.ts` and `public/assets/ecdsa-interop.js` — DER ↔ raw conversion, SPKI import, and raw verification.
+- `src/lib/seal-a-provider.ts` and `public/assets/seal-a-provider.js` — Seal A provider bridge.
+- `public/assets/aegis-keystore-web.js` — web stub that reports `available:false` and `NOT_A_NATIVE_BUILD`.
+- `docs/KEYSTORE.md` — backend ladder, DER/raw fact, auth-gated key risk, and what a hardware-backed signature does and does not prove.
+- `DISTRIBUTION-REPORT.md` — Segment 2 status and the user-run compile command.
+
+### Changed
+
+- `public/assets/index-CL6IUdNY.js` — Seal A generation and signing call sites route through the bridge; checkpoints and the model delta carry `keyProvider` and `securityLevel`.
+- `public/assets/selftest-4a7c1e.js` — five new browser checks for DER/raw interop and the web stub.
+- `.github/workflows/android.yml` — calls `native/scripts/install-plugin.sh` after `npx cap add android`.
+- `native/README.md` — provider matrix and the "what this upgrade does and does not prove" section.
+- `README.md` — the APK path is marked OPTIONAL / EXPERIMENTAL; the browser install action remains the primary route.
+
+### Not executed
+
+- Java compilation, Gradle, APK/AAB, device tests, and the Java unit test were not run.
+
 ## 2026-10-25 — app 44.2.0 / spec aegis44/2
 
 This entry covers the public repository cleanup and the build it publishes. The app version and spec version are taken from the source: `appVersion` is `44.2.0`, `specVersion` is `aegis44/2`, and the service-worker cache is `aegis44-ble-1`.

@@ -5,3 +5,12 @@
 .grid-cols-12{grid-template-columns:repeat(12,minmax(0,1fr))}
 
 .grid-cols-13{grid-template-columns:repeat(13,minmax(0,1fr))}
+
+/* AEGIS: horizontally scrollable nav rail with intact labels. */
+.aegis-nav-rail{display:flex;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.aegis-nav-rail::-webkit-scrollbar{display:none}
+.aegis-nav-item{flex:0 0 auto;min-width:68px}
+.aegis-nav-label{white-space:nowrap;overflow:visible;text-overflow:clip;font-size:8px}
+/* AEGIS: content clearance above the fixed bottom nav. */
+main{padding-bottom:calc(10rem + env(safe-area-inset-bottom))}
+html,body{overflow-x:hidden}

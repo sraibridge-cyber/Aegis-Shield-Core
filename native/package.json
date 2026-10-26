@@ -1,0 +1,21 @@
+{
+  "name": "aegis-shield",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "scripts": {
+    "sync-web": "node -e \"const fs=require('fs');fs.rmSync('www',{recursive:true,force:true});fs.mkdirSync('www',{recursive:true});fs.copyFileSync('../index.html','www/index.html');fs.cpSync('../public','www',{recursive:true});\"",
+    "sync": "npm run build && cap sync"
+  },
+  "dependencies": {
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/android": "^7.0.0",
+    "@capacitor-community/bluetooth-le": "^7.0.0",
+    "@capacitor/filesystem": "^7.0.0",
+    "@capacitor/motion": "^7.0.0",
+    "@capacitor/geolocation": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0"
+  }
+}

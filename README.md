@@ -105,3 +105,24 @@ MIT. Copyright (c) 2026 Complex System Sanity Labs / Kyle S. Whitlock. See `LICE
 ## Closing limitations
 
 AEGIS records observations and seals them on the device that runs it. It does not detect surveillance, block or jam anything, or transmit anything. A verification pass proves only that the records have not changed since sealing on that device; it does not prove the observations were true, when they happened, or that the device was uncompromised. The device clock is not an external timestamp authority. A clean build from this repository contains no host beacons; the vendor-hosted copy does, and the app's own "no telemetry" statement is true only of the clean build. If you need a copy you can inspect, build it from this repository and compare the files.
+
+## Native Android wrapper
+
+The `native/` directory is an additive Capacitor 7 wrapper for the web build. The web build remains the primary artifact; the wrapper does not replace it. The primary install route remains the browser's own install action from the hosted page, which is already proven and needs no build toolchain. The `.github/workflows/android.yml` APK path is OPTIONAL / EXPERIMENTAL: it is configuration only, no APK is included, and it has not been run here. See `native/README.md` for the local build commands, the provider matrix, and the limits.
+
+## Native capability bridge (SEGMENT 3)
+
+The APK path now includes a native `HullTelemetry` plugin. It is read-only, consent-gated, and returns an explicit failure code instead of a placeholder value. The Java is written but **not compiled in this repository's development environment**; the Capacitor/Gradle CI path is what compiles it. The published website is a separate build; this repository's `public/` bundle is the source of truth for the APK and may diverge from the published site.
+
+| Capability | What is read | Android API | Permission | Default |
+| --- | --- | --- | --- | --- |
+| VITALS | Battery level/status/temperature/voltage/current, thermal status, memory, storage, uptime, CPU load, app PSS/threads | `BatteryManager`, `PowerManager`, `ActivityManager.MemoryInfo`, `StatFs`, `SystemClock`, `Runtime`, `Debug.MemoryInfo` | none | on |
+| MOTION | Accelerometer, gyroscope, magnetometer, rotation vector, bounded 2 s window | `SensorManager` | none | on |
+| ENVIRONMENT | Light, pressure, proximity, ambient temperature, humidity; absent sensors named individually | `SensorManager` | none | on |
+| RF_BLE | Passive BLE advertisements, 10 s deadline, address hashed, name only with CONNECT | `BluetoothLeScanner.startScan` | `BLUETOOTH_SCAN` (`neverForLocation`), optional `BLUETOOTH_CONNECT` | off |
+| RF_WIFI | Passive Wi-Fi scan results, opt-in only, throttle reported as `SCAN_THROTTLED` | `WifiManager.getScanResults` | `ACCESS_FINE_LOCATION`, `NEARBY_WIFI_DEVICES` (API 33+) | off |
+| ATTEST | Seal A certificate chain, attestation extension fields, Build fingerprint/model/patch | `KeyStore.getCertificateChain`, Android key attestation extension | none | on |
+| POSTURE | Device lock, biometric availability, boot count, app-scoped ID hash, screen, battery saver | `KeyguardManager`, `BiometricManager`, `Settings`, `PowerManager` | none | on |
+| CLOCK_INTEGRITY | Paired wall-clock and monotonic samples, observed divergence | `System.currentTimeMillis`, `SystemClock.elapsedRealtime` | none | on |
+
+No camera, microphone, contacts, `READ_PHONE_STATE`, body sensors, activity recognition, or whole-storage permission is declared. Location is declared only for the opt-in RF_WIFI group and is requested only from that group's control. Nothing is requested at launch.

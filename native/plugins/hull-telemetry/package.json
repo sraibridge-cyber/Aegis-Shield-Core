@@ -1,0 +1,14 @@
+{
+  "name": "@aegis/hull-telemetry",
+  "version": "1.0.0",
+  "description": "Consent-mediated, read-only Android hardware bridge for AEGIS.",
+  "main": "dist/plugin.cjs.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "files": ["android/src/main/java", "src", "dist"],
+  "keywords": ["capacitor", "android", "telemetry", "aegis"],
+  "license": "MIT",
+  "peerDependencies": {
+    "@capacitor/core": "^7.0.0"
+  }
+}
