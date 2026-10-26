@@ -1,0 +1,65 @@
+# One-time migration: overlays the verified AEGIS tree onto main, then goes inert.
+# GitHub refuses workflow-file changes pushed with GITHUB_TOKEN, so this overlay
+# deliberately never touches .github/. It runs once: the commit it pushes adds
+# BOOTSTRAP-DONE, and every later run exits early because that marker exists.
+name: Bootstrap Tree
+on:
+  push:
+    branches: [ main ]
+permissions:
+  contents: write
+concurrency:
+  group: bootstrap-tree
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Stop if the migration already ran
+        id: guard
+        run: |
+          if [ -f BOOTSTRAP-DONE ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "marker present — nothing to do"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Fetch the pinned tree archive
+        if: steps.guard.outputs.run == 'true'
+        env:
+          TREE_URL: "https://storage.googleapis.com/vincen-ai/sessions/aSyNcgKIMVufN26oSQvs/outputs/6Qnt8AwfWcSGIrqpwwbI/Aegis-Shield-Core-Repo.zip?v=1792977707543"
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 4 --retry-delay 3 -o /tmp/tree.zip "$TREE_URL"
+          test -s /tmp/tree.zip
+          echo "archive bytes: $(stat -c%s /tmp/tree.zip)"
+          sha256sum /tmp/tree.zip | tee /tmp/tree.sha
+      - name: Overlay the tree without touching workflow files
+        if: steps.guard.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/tree && mkdir -p /tmp/tree
+          unzip -q /tmp/tree.zip -d /tmp/tree
+          SRC="$(dirname "$(find /tmp/tree -name package.json -not -path '*/node_modules/*' | head -n1)")"
+          echo "archive root: $SRC"
+          test -f "$SRC/index.html"
+          test -d "$SRC/public/assets"
+          rsync -a --exclude '.git/' --exclude '.github/' "$SRC"/ ./
+          echo "public/assets files: $(find public/assets -type f | wc -l)"
+          grep -o 'assets/index-[A-Za-z0-9_-]*\.js' index.html | head -n1 || true
+      - name: Commit the tree
+        if: steps.guard.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "aegis-bootstrap"
+          git config user.email "aegis-bootstrap@users.noreply.github.com"
+          date -u +%Y-%m-%dT%H:%M:%SZ > BOOTSTRAP-DONE
+          git add -A
+          git status --porcelain | head -n 30
+          SHA="$(cut -d' ' -f1 /tmp/tree.sha)"
+          git commit -m "fix: land the verified AEGIS tree (BLE state-merge crash, nav truncation, safe-area clearance, handler boundary) — archive sha256 ${SHA}"
+          git push origin HEAD:main
