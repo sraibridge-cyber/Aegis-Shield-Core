@@ -45,17 +45,21 @@ Routes are hash routes. `index.html` rewrites known pathnames to hashes, so `/#/
 
 ## Run it in a browser
 
-Build first, then serve the built folder:
+Neither directory in this repository is serveable on its own, and no script in `package.json` assembles them. `package.json` declares exactly one build script, `vite build`, and no script in it copies `public/` into `dist/`, rewrites the root `index.html`, or removes the host beacons. The root `index.html` loads `./assets/index-CL6IUdNY.js`, and no `assets/` directory exists at the repository root — those files live under `public/assets/` — so a bare `vite build` has no `./assets/...` to resolve from the root. Whatever it emits, it is not the assembled AEGIS tree this project ships.
+
+The browser build is assembled the way the CI build assembles it: one directory holding the root `index.html` beside the contents of `public/`. The root file is the shell that mounts the app; `public/` holds `assets/`, `icons/`, `manifest.json` and `service-worker.js`, and has no `index.html` of its own.
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm build
-python3 -m http.server 8080 --directory dist
+rm -rf www
+mkdir -p www
+cp index.html www/index.html
+cp -R public/. www/
+python3 -m http.server 8080 --directory www
 ```
 
 Open `http://localhost:8080`. It must be served, not opened as a `file://` URL, because Web Crypto and the service worker require HTTPS or localhost.
 
-The repository root is not directly serveable: `index.html` references `./assets/...`, and the assets live under `public/assets/`. The build copies them into `dist/`, which is the folder to serve.
+The Android wrapper builds this same tree: the workflow stages it and hands it to Capacitor as the web directory.
 
 ## Install to a home screen
 
@@ -66,23 +70,20 @@ The repository root is not directly serveable: `index.html` references `./assets
 
 ## Run fully offline after one load
 
-1. Serve the built `dist/` over HTTPS or localhost.
+1. Serve the assembled `www/` directory over HTTPS or localhost.
 2. Load the page once with the network on and wait for the service worker to activate. The self-test's "Service worker registration" check reports the active registration.
 3. Switch the network off and reload. The service worker serves the cached shell.
 4. The app's own code makes no outbound request. The browser may still make its own requests (favicon, DNS, update checks) outside the app's control.
 
 ## Build from source
 
-```bash
-pnpm install --frozen-lockfile
-pnpm build
-```
+There is no separate compile step for the AEGIS runtime. The runtime is the prebuilt bundle committed under `public/assets/`, and the root `index.html` loads it directly; the assembly in the section above is the whole of the local build.
 
-Output: `dist/` (36 files after the host beacons are removed). The build copies the prebuilt AEGIS bundle from `public/` into `dist/` and transforms the root `index.html`. It does not compile the React template in `src/`; the root `index.html` loads `./assets/index-CL6IUdNY.js` directly. The `src/` tree is the Vincen template scaffold (React 19 + Vite + TanStack Router + Neon) and is not part of the AEGIS runtime. The AEGIS app's editable source is not in this archive; the bundle is the only AEGIS implementation present.
+The `src/` tree is the Vincen template scaffold (React 19 + Vite + TanStack Router + Neon) and is not part of the AEGIS runtime. The AEGIS app's editable source is not in this repository; the committed bundle is the only AEGIS implementation present. A local build therefore cannot differ from the committed bundle except by the host-beacon removal described below, and the file count of an assembled tree is whatever `public/` plus the root `index.html` hold at that commit. This README does not restate that as a fixed number, because it changes whenever the bundle does.
 
 ## Self-host
 
-The built `dist/` is static files. Any static host works: GitHub Pages (the recommended primary address), an object store, or any web server. There is no server-side component. For GitHub Pages, publish the contents of `dist/` to a `gh-pages` branch or a `/docs` folder and enable Pages for that source. The repository root is not the deployable root; `dist/` is.
+The assembled `www/` directory is static files. Any static host works: GitHub Pages (the recommended primary address), an object store, or any web server. There is no server-side component. For GitHub Pages, publish the contents of `www/` to a `gh-pages` branch or a `/docs` folder and enable Pages for that source. Neither the repository root nor `public/` is deployable on its own: the root `index.html` cannot resolve `./assets/...` there, and `public/` has no `index.html`.
 
 ## Vendor-hosted copy vs a reproducible build
 
