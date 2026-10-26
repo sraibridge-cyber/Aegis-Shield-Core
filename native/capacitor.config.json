@@ -1,6 +1,6 @@
 {
-  "appId": "ai.apptribe.vincen.techlab",
-  "appName": "Vincen",
+  "appId": "com.aegis.shield",
+  "appName": "AEGIS",
   "webDir": "www",
   "android": {
     "allowMixedContent": false
