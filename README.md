@@ -112,7 +112,7 @@ The `native/` directory is an additive Capacitor 7 wrapper for the web build. Th
 
 ## Download and check the APK
 
-Each APK is published as a GitHub release carrying two assets: `app-debug.apk` and `app-debug.apk.sha256`. `apk-latest` is a moving tag that points at the newest gated build. Every earlier build is kept under an immutable `apk-YYYYMMDDTHHMMSSZ` tag and is never replaced or deleted, so a build cannot be withdrawn after the fact.
+Each app build is published as a GitHub release carrying two assets: `app-debug.apk` and `app-debug.apk.sha256`. `apk-latest` is a moving tag: its two assets are replaced in place on every build, and each build is also stored under its own tag, `apk-YYYYMMDDTHHMMSSZ`, which is never overwritten or deleted, so moving the pointer never withdraws a build. Every archived build is published as a pre-release, and `apk-latest` is the only full release, which is why it alone carries GitHub's Latest marker. One tag does not follow that pattern: the single pre-gate binary, preserved under `apk-prev-15e0567a74b0`, which carries the same two assets.
 
 To check a download against the release record, from a clone of this repository:
 
