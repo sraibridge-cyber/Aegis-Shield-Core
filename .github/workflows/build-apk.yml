@@ -200,7 +200,7 @@ jobs:
             if (raw) list = JSON.parse(raw);
           }
           const wanted = [
-            { pkg: '@capacitor-community/bluetooth-le', classpath: 'com.capacitorjs.community.bluetoothle.BluetoothLePlugin' },
+            { pkg: '@capacitor-community/bluetooth-le', classpath: 'com.capacitorjs.community.plugins.bluetoothle.BluetoothLe' },
             { pkg: '@aegis/keystore', classpath: 'io.aegis.keystore.AegisKeystorePlugin' },
             { pkg: '@aegis/hull-telemetry', classpath: 'io.aegis.telemetry.HullTelemetryPlugin' }
           ];
@@ -273,7 +273,7 @@ jobs:
           DEX_FILES=$(unzip -Z1 "$APK" | grep -E '^classes[0-9]*\.dex$' || true)
           echo "dex entries: $DEX_FILES"
           fail=0
-          for cls in AegisKeystorePlugin HullTelemetryPlugin BluetoothLePlugin; do
+          for cls in AegisKeystorePlugin HullTelemetryPlugin BluetoothLe; do
             if unzip -p "$APK" 'classes*.dex' | strings | grep -q "$cls"; then
               echo "GATE OK: dex contains $cls"
             else
@@ -283,7 +283,7 @@ jobs:
           done
           unzip -p "$APK" assets/capacitor.plugins.json > /tmp/gate-plugins.json
           cat /tmp/gate-plugins.json
-          for cls in AegisKeystorePlugin HullTelemetryPlugin BluetoothLePlugin; do
+          for cls in AegisKeystorePlugin HullTelemetryPlugin BluetoothLe; do
             if grep -q "$cls" /tmp/gate-plugins.json; then
               echo "GATE OK: capacitor.plugins.json lists $cls"
             else
@@ -291,6 +291,26 @@ jobs:
               fail=1
             fi
           done
+          set +e
+          python3 - <<'PYEOF'
+          import json, subprocess
+          entries = json.load(open('/tmp/gate-plugins.json'))
+          apk = 'cap/android/app/build/outputs/apk/debug/app-debug.apk'
+          dex = subprocess.run(['bash', '-lc', "unzip -p '%s' 'classes*.dex' | strings" % apk],
+                               capture_output=True, text=True).stdout
+          bad = [e['classpath'] for e in entries if e['classpath'].split('.')[-1] not in dex]
+          if bad:
+              print('GATE FAIL: capacitor.plugins.json registers classpath(s) the dex does not contain: ' + ', '.join(bad))
+              raise SystemExit(2)
+          print('GATE OK: every registered classpath resolves in the compiled dex (%d entries)' % len(entries))
+          PYEOF
+          RC=$?
+          set -e
+          if [ "$RC" -ne 0 ]; then
+            echo "GATE FAIL: the plugin registry is not consistent with the compiled dex"
+            fail=1
+          fi
+
           ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
           AAPT2=$(ls -1 "$ANDROID_SDK_ROOT"/build-tools/*/aapt2 2>/dev/null | sort -V | tail -n 1 || true)
           : > gate-permissions.txt
