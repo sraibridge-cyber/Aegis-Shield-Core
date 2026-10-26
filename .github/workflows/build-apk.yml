@@ -463,9 +463,16 @@ jobs:
               print('GATE FAIL: content differs between ' + src + ' and the APK (%d): ' % len(differing) + ', '.join(differing[:10]))
           if unexpected:
               print('GATE FAIL: the APK ships web-root files that were never staged (%d): ' % len(unexpected) + ', '.join(unexpected[:10]) + '. Only the Capacitor bridge files ' + ', '.join(sorted(INJECTED)) + ' may appear without being staged.')
+          EMPTY_SHA = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+          # The two Capacitor bridge files are empty placeholders in this build. A non-empty one is
+          # script the WebView can execute and that never came through the staged tree, so it must be
+          # pinned deliberately instead of passing on its filename alone.
+          carrying = [k for k in extra if k in INJECTED and packed[k] != EMPTY_SHA]
           if extra:
               print('packaged files not staged, all Capacitor bridge injections: ' + ', '.join('%s (sha256 %s)' % (k, packed[k]) for k in extra))
-          if missing or differing or unexpected:
+          if carrying:
+              print('GATE FAIL: the Capacitor bridge files are empty placeholders in this build, but these carry content the WebView could execute and that was never staged: ' + ', '.join('%s (sha256 %s)' % (k, packed[k]) for k in carrying) + '. Pin and review that content deliberately before allowing it through.')
+          if missing or differing or unexpected or carrying:
               sys.exit(4)
           entry = None
           with open(os.path.join(src, 'index.html'), 'r', encoding='utf-8', errors='replace') as fh:
@@ -611,6 +618,13 @@ jobs:
             exit 1
           fi
           echo "PUBLISH VERIFIED: apk-latest serves app-debug.apk sha256 $GOT"
+          gh release download apk-latest --pattern app-debug.apk.sha256 --dir verify --clobber
+          SUM_GOT=$(grep -oE '[0-9a-f]{64}' verify/app-debug.apk.sha256 | head -n1 || true)
+          if [ "$SUM_GOT" != "$APK_HASH" ]; then
+            echo "::error::apk-latest serves app-debug.apk.sha256 recording ${SUM_GOT:-NO HASH} but the gated build is $APK_HASH, so the published checksum does not describe the published binary and anyone verifying the download would be misled"
+            exit 1
+          fi
+          echo "CHECKSUM VERIFIED: apk-latest serves app-debug.apk.sha256 recording $SUM_GOT, which matches the gated binary"
           git tag -f apk-latest "$GITHUB_SHA"
           if ! git push --force origin refs/tags/apk-latest; then
             echo "::error::could not move the apk-latest tag ref to $GITHUB_SHA"
