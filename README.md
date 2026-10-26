@@ -108,7 +108,22 @@ AEGIS records observations and seals them on the device that runs it. It does no
 
 ## Native Android wrapper
 
-The `native/` directory is an additive Capacitor 7 wrapper for the web build. The web build remains the primary artifact; the wrapper does not replace it. The primary install route remains the browser's own install action from the hosted page, which is already proven and needs no build toolchain. The `.github/workflows/android.yml` APK path is OPTIONAL / EXPERIMENTAL: it is configuration only, no APK is included, and it has not been run here. See `native/README.md` for the local build commands, the provider matrix, and the limits.
+The `native/` directory is an additive Capacitor 7 wrapper for the web build. The browser build is the prototype; the APK is the distributable artifact, because it wraps the same web bundle and adds native capabilities the browser sandbox cannot expose. The APK is not local configuration and is not experimental: it is built by `.github/workflows/build-apk.yml` on every push to `main`, which runs the Gradle build, overlays this repository's `android/` and `native/plugins`, and fails unless the compiled plugin classes are present in the packaged `classes*.dex`. See `native/README.md` for the local build commands, the provider matrix, and the limits.
+
+## Download and check the APK
+
+Each APK is published as a GitHub release carrying two assets: `app-debug.apk` and `app-debug.apk.sha256`. `apk-latest` is a moving tag that points at the newest gated build. Every earlier build is kept under an immutable `apk-YYYYMMDDTHHMMSSZ` tag and is never replaced or deleted, so a build cannot be withdrawn after the fact.
+
+To check a download against the release record, from a clone of this repository:
+
+```bash
+bash scripts/verify-release.sh                       # apk-latest
+bash scripts/verify-release.sh apk-20261026T131213Z  # one archived build
+```
+
+The script reads both asset URLs out of the public release metadata, downloads them, and compares the digest the sidecar records against the digest of the bytes it downloaded. It reports whether `sha256sum -c app-debug.apk.sha256` applies to that release: builds published after the sidecar-format fix carry one bare digest line that `sha256sum -c` reads directly, while earlier builds carry a legacy two-line form that `sha256sum -c` rejects outright — for those the script compares the recorded digest and byte count against the binary itself and states plainly that the one-command check does not apply. The asset reads are public: no account, token or credential is needed.
+
+A pass establishes that the bytes you downloaded are the bytes the release records. It does not establish who produced them, that any commit in this repository reproduces them (the build is not bit-reproducible), or that the code is safe to run. The APK carries a debug signature, which identifies no publisher. The device clock is still not an external timestamp authority, and a release date is not evidence of when a binary was built.
 
 ## Native capability bridge (SEGMENT 3)
 
