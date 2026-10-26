@@ -200,6 +200,16 @@ jobs:
           echo "--- manifest head ---"
           head -n 12 "$MANIFEST"
 
+      - name: Build the debug APK
+        working-directory: cap/android
+        run: |
+          set -euo pipefail
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-unknown} ANDROID_HOME=${ANDROID_HOME:-unset}"
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+          echo "--- built artefacts ---"
+          ls -la app/build/outputs/apk/debug/
+
       - name: Verify the dex, the plugin registry and the permission surface
         run: |
           set -euo pipefail
