@@ -22,7 +22,9 @@
 # digest of the bytes, and the byte record still has to match the bytes.
 #
 # What a pass establishes:
-# The bytes you downloaded are the bytes the release records.
+# The three records a release publishes of one build — the binary, the sidecar beside it, and the
+# digest written into the release body — describe the same bytes, or the body is reported as
+# recording no digest at all rather than being treated as agreement.
 #
 # What it does not establish:
 # Who built them, that any commit in this repository produces them (the build is not
@@ -140,6 +142,29 @@ say "computed   : $GOT"
 
 if [ "$GOT" != "$RECORDED" ]; then
   die "the published sidecar records digest '$RECORDED' but the published APK hashes to '$GOT'. The pair does not describe one another."
+fi
+# Three records carry this digest: the sidecar asset, the binary it describes, and the release body
+# written at publish time. Checking only the first two means a body edited after publication would
+# go unnoticed, and the body is the record a reader sees first. The API's own asset digests are
+# formatted "sha256:<hex>" with no space, so the pattern below matches only the body's prose form
+# "sha256 <hex>" and cannot accidentally read an asset digest back as the body's claim.
+BODY_DIGEST="$(grep -oE 'sha256[[:space:]]+[0-9a-f]{64}' "$TMP/release.json" | head -n1 | sed -E 's/^sha256[[:space:]]+//' || true)"
+BODY_BYTES="$(grep -oE '[0-9]+ bytes' "$TMP/release.json" | head -n1 | sed -E 's/ bytes$//' || true)"
+if [ -n "$BODY_DIGEST" ]; then
+  if [ "$BODY_DIGEST" != "$RECORDED" ]; then
+    die "the release body records digest '$BODY_DIGEST' but the published sidecar records '$RECORDED'. Two published records of the same release disagree, so at least one was changed after publication."
+  fi
+  say "body digest: $BODY_DIGEST, matching the sidecar"
+else
+  say "body digest: NOT MEASURED - this release body records no 'sha256 <digest>' line, so it cannot corroborate the sidecar"
+fi
+if [ -n "$BODY_BYTES" ]; then
+  if [ "$BODY_BYTES" != "$APK_BYTES" ]; then
+    die "the release body records $BODY_BYTES bytes but the published APK is $APK_BYTES bytes. Two published records of the same release disagree."
+  fi
+  say "body bytes : $BODY_BYTES, matching the published APK"
+else
+  say "body bytes : NOT MEASURED - this release body records no '<n> bytes' figure, so it cannot corroborate the published size"
 fi
 
 if [ "$FORMAT" = "bare" ]; then
