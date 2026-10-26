@@ -553,6 +553,9 @@ jobs:
             # anchored ^Git commit: match. Search the body for the pattern instead; without this the
             # archive attribution below always degraded to NOT RECORDED even when the commit was recorded.
             echo "apk-latest records build time ${LIVE_STAMP:-NOT RECORDED} from commit ${PREV_RECORDED_SHA:-NOT RECORDED}"
+            if [ -z "$LIVE_STAMP" ]; then
+              echo "::warning::apk-latest body carries no parseable 'AUTHORITATIVE BUILD TIME: <stamp>' record, so the ordering guard below cannot be enforced on this publish: the step cannot tell whether it would move the public download to older code"
+            fi
             if [ -z "$PREV_RECORDED_SHA" ]; then
               echo "::warning::apk-latest body carries no parseable 'Git commit: <sha>' record, so the superseded binary's builder commit cannot be attributed"
             fi
@@ -662,3 +665,18 @@ jobs:
             exit 1
           fi
           echo "TAG REF VERIFIED: apk-latest resolves to $MOVED, so the tag names the source this binary was built from"
+          # The repository ships scripts/verify-release.sh and the README tells a reader to run it, but
+          # nothing in this workflow ever invoked it, so the documented procedure was only ever
+          # exercised by hand and a change that broke it would publish silently. It is exercised here
+          # against both the permanent record and the moving pointer, with GH_TOKEN already in the
+          # environment so the metadata request stays inside the API rate limit.
+          test -f scripts/verify-release.sh
+          if ! bash scripts/verify-release.sh "$TAG"; then
+            echo "::error::the repository's own verifier rejects $TAG, the release this run just published, so anyone following the README would get a failure on this build"
+            exit 1
+          fi
+          if ! bash scripts/verify-release.sh apk-latest; then
+            echo "::error::the repository's own verifier rejects apk-latest after this publish, so the current download fails the procedure the install page documents"
+            exit 1
+          fi
+          echo "VERIFIER EXERCISED: scripts/verify-release.sh returns MATCH for $TAG and for apk-latest, so the documented check works on this build"
