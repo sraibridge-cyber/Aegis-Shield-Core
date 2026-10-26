@@ -80,7 +80,7 @@ jobs:
           ref=$(grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' index.html | head -n1 || true)
           if [ -n "$ref" ]; then test -f "cap/www/$ref" || { echo "::error::index.html references $ref but that file is not in the packaged webDir"; exit 1; }; echo "entry bundle referenced by index.html: $ref"; fi
           test -f cap/www/manifest.json || { echo "::error::cap/www/manifest.json is missing"; exit 1; }
-          test -f cap/www/service-worker.js || echo "::warning::cap/www/service-worker.js is missing"
+          test -f cap/www/service-worker.js || { echo "::error::cap/www/service-worker.js is missing - without it the installed app is not offline-capable after the first load, which is a stated promise of the app"; exit 1; }
           echo "ASSEMBLED cap/www:"; ls -la cap/www
           echo "asset count: $(ls cap/www/assets | wc -l)"
 
@@ -390,16 +390,27 @@ jobs:
           python3 - <<'PYEOF'
           import hashlib, json, os, re, sys, zipfile
           apk = 'cap/android/app/build/outputs/apk/debug/app-debug.apk'
-          with open('native/capacitor.config.json') as cfh:
-              webdir = json.load(cfh).get('webDir')
+          repo_cfg_path = 'native/capacitor.config.json'
+          used_cfg_path = 'cap/capacitor.config.json'
+          with open(repo_cfg_path) as cfh:
+              repo_cfg = json.load(cfh)
+          if not os.path.isfile(used_cfg_path):
+              print('GATE FAIL: ' + used_cfg_path + ' is absent, so the config the Android project actually used cannot be read; comparing against the repo copy would assume the two are the same file')
+              sys.exit(6)
+          with open(used_cfg_path) as cfh:
+              used_cfg = json.load(cfh)
+          if used_cfg != repo_cfg:
+              print('GATE FAIL: ' + used_cfg_path + ' differs from ' + repo_cfg_path + ', so the tree the APK was built from and the tree this gate compares are not established to be the same. Built with ' + json.dumps(used_cfg, sort_keys=True) + ' but the repo declares ' + json.dumps(repo_cfg, sort_keys=True))
+              sys.exit(6)
+          webdir = used_cfg.get('webDir')
           if not webdir:
-              print('GATE FAIL: native/capacitor.config.json declares no webDir, so the tree the APK is compared against cannot be identified')
+              print('GATE FAIL: ' + used_cfg_path + ' declares no webDir, so the tree the APK is compared against cannot be identified')
               sys.exit(6)
           src = os.path.join('cap', webdir)
           if not os.path.isdir(src):
-              print('GATE FAIL: capacitor.config.json declares webDir ' + webdir + ' but ' + src + ' does not exist, so the compared tree is not the tree that was staged into the build')
+              print('GATE FAIL: ' + used_cfg_path + ' declares webDir ' + webdir + ' but ' + src + ' does not exist, so the compared tree is not the tree that was staged into the build')
               sys.exit(6)
-          print('staged web tree, derived from capacitor.config.json webDir ' + webdir + ': ' + src)
+          print('staged web tree, derived from ' + used_cfg_path + ' webDir ' + webdir + ': ' + src)
           zf = zipfile.ZipFile(apk)
           names = [n for n in zf.namelist() if not n.endswith('/')]
           html = [n for n in names if n.rsplit('/', 1)[-1] == 'index.html']
@@ -441,26 +452,33 @@ jobs:
           missing = sorted(set(staged) - set(packed))
           differing = sorted(k for k in staged if k in packed and staged[k] != packed[k])
           extra = sorted(set(packed) - set(staged))
+          # Capacitor injects exactly these two bridge files into the web root on every sync and they are
+          # not part of the staged bundle. Every other packaged file must have come from the staged tree,
+          # so the remainder is asserted rather than printed as a note.
+          INJECTED = {'cordova.js', 'cordova_plugins.js'}
+          unexpected = [k for k in extra if k not in INJECTED]
           if missing:
-              print('GATE FAIL: staged but absent from the APK: ' + ', '.join(missing[:10]))
+              print('GATE FAIL: staged but absent from the APK (%d): ' % len(missing) + ', '.join(missing[:10]))
           if differing:
-              print('GATE FAIL: content differs between cap/www and the APK: ' + ', '.join(differing[:10]))
+              print('GATE FAIL: content differs between ' + src + ' and the APK (%d): ' % len(differing) + ', '.join(differing[:10]))
+          if unexpected:
+              print('GATE FAIL: the APK ships web-root files that were never staged (%d): ' % len(unexpected) + ', '.join(unexpected[:10]) + '. Only the Capacitor bridge files ' + ', '.join(sorted(INJECTED)) + ' may appear without being staged.')
           if extra:
-              print('note: packaged files not staged from cap/www (informational, not a failure): ' + ', '.join(extra[:10]))
-          if missing or differing:
+              print('packaged files not staged, all Capacitor bridge injections: ' + ', '.join('%s (sha256 %s)' % (k, packed[k]) for k in extra))
+          if missing or differing or unexpected:
               sys.exit(4)
           entry = None
           with open(os.path.join(src, 'index.html'), 'r', encoding='utf-8', errors='replace') as fh:
               m = re.search(r'assets/index-[A-Za-z0-9_-]+[.]js', fh.read())
               entry = m.group(0) if m else None
           if entry is None:
-              print('GATE NOT MEASURED: cap/www/index.html names no entry bundle matching assets/index-*.js')
+              print('GATE NOT MEASURED: ' + src + '/index.html names no entry bundle matching assets/index-*.js')
           elif entry not in packed:
               print('GATE FAIL: index.html loads ' + entry + ' but that file is not inside the APK')
               sys.exit(5)
           else:
               print('GATE OK: the APK ships ' + entry + ' with sha256 ' + packed[entry])
-          print('GATE OK: every staged web asset is present inside the APK and byte-identical (%d files)' % len(staged))
+          print('GATE OK: every staged web asset is present inside the APK and byte-identical (%d staged files, %d packaged, %d Capacitor bridge files accounted for)' % (len(staged), len(packed), len(extra)))
           PYEOF
           WEB_RC=$?
           set -e
@@ -517,9 +535,15 @@ jobs:
           PREV_RECORDED_SHA=""
           if gh release view apk-latest >/dev/null 2>&1; then
             LIVE_BODY=$(gh release view apk-latest --json body --jq '.body')
-            LIVE_STAMP=$(printf '%s\n' "$LIVE_BODY" | sed -nE 's/^AUTHORITATIVE BUILD TIME: ([0-9]{8}T[0-9]{6}Z).*/\1/p' | head -n1)
-            PREV_RECORDED_SHA=$(printf '%s\n' "$LIVE_BODY" | sed -nE 's/^Git commit: ([0-9a-f]{40}).*/\1/p' | head -n1)
+            LIVE_STAMP=$(printf '%s\n' "$LIVE_BODY" | grep -oE 'AUTHORITATIVE BUILD TIME: [0-9]{8}T[0-9]{6}Z' | head -n1 | sed 's/^AUTHORITATIVE BUILD TIME: //' || true)
+            PREV_RECORDED_SHA=$(printf '%s\n' "$LIVE_BODY" | grep -oE 'Git commit: [0-9a-f]{40}' | head -n1 | sed 's/^Git commit: //' || true)
+            # apk-latest writes its body as a single prose line, so the commit cannot be found by an
+            # anchored ^Git commit: match. Search the body for the pattern instead; without this the
+            # archive attribution below always degraded to NOT RECORDED even when the commit was recorded.
             echo "apk-latest records build time ${LIVE_STAMP:-NOT RECORDED} from commit ${PREV_RECORDED_SHA:-NOT RECORDED}"
+            if [ -z "$PREV_RECORDED_SHA" ]; then
+              echo "::warning::apk-latest body carries no parseable 'Git commit: <sha>' record, so the superseded binary's builder commit cannot be attributed"
+            fi
             if [ -n "$LIVE_STAMP" ] && [ "$LIVE_STAMP" \> "$STAMP" ]; then
               echo "::error::apk-latest already serves the newer build $LIVE_STAMP; this build is $STAMP. Refusing to move the public download backwards to older code."
               exit 1
