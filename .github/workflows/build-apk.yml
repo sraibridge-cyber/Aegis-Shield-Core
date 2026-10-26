@@ -420,7 +420,7 @@ jobs:
           echo "ARCHIVED: $TAG"
           if gh release view apk-latest >/dev/null 2>&1; then
             gh release upload apk-latest "$APK" "$SUM" --clobber
-            gh release edit apk-latest --title "AEGIS debug APK (latest build, built $STAMP)" --notes "AUTHORITATIVE BUILD TIME: $STAMP. Git commit: $GITHUB_SHA. Workflow run: $GITHUB_RUN_ID. Web assets are bundled inside the APK, so it works offline. The debug signature identifies no publisher. sha256 $APK_HASH, $APK_SIZE bytes. NOTE: GitHub reports this release's published date as the moment the apk-latest tag was first created; it does not change when the asset is replaced, so that date is older than this binary. The build time in this title is authoritative."
+            gh release edit apk-latest --title "AEGIS debug APK (latest build, built $STAMP)" --notes "AUTHORITATIVE BUILD TIME: $STAMP. Git commit: $GITHUB_SHA. Workflow run: $GITHUB_RUN_ID. Web assets are bundled inside the APK, so it works offline. The debug signature identifies no publisher. sha256 $APK_HASH, $APK_SIZE bytes. NOTE: this release is updated in place, so GitHub's published date is when it was first published and does not move when the asset is replaced; that date is older than this binary. The build time in this title is authoritative. The apk-latest tag is moved to the build commit on every publish, so cloning at that tag returns the source this binary was built from."
           else
             gh release create apk-latest "$APK" "$SUM" --target $GITHUB_SHA --title "AEGIS debug APK (latest build, built $STAMP)" --notes "AUTHORITATIVE BUILD TIME: $STAMP. Git commit: $GITHUB_SHA. Workflow run: $GITHUB_RUN_ID. Web assets are bundled inside the APK, so it works offline. The debug signature identifies no publisher. sha256 $APK_HASH, $APK_SIZE bytes. This release was created together with this binary, so its published date is accurate."
           fi
@@ -432,3 +432,14 @@ jobs:
             exit 1
           fi
           echo "PUBLISH VERIFIED: apk-latest serves app-debug.apk sha256 $GOT"
+          git tag -f apk-latest "$GITHUB_SHA"
+          if ! git push --force origin refs/tags/apk-latest; then
+            echo "::error::could not move the apk-latest tag ref to $GITHUB_SHA"
+            exit 1
+          fi
+          MOVED=$(git ls-remote origin refs/tags/apk-latest | cut -f1)
+          if [ "$MOVED" != "$GITHUB_SHA" ]; then
+            echo "::error::apk-latest resolves to $MOVED remotely but this build is $GITHUB_SHA"
+            exit 1
+          fi
+          echo "TAG REF VERIFIED: apk-latest resolves to $MOVED, so the tag names the source this binary was built from"
