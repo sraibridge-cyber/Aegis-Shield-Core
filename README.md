@@ -2,6 +2,8 @@
 
 AEGIS is a local, offline-capable browser application for recording observations and sealing them on the device that runs it. It has 15 routes, no server, no account, and no vendor key. The running app is the static bundle in `public/`; the `src/` directory is the Vincen template scaffold and is not part of the AEGIS runtime.
 
+Built by Kyle S. Whitlock (Complex System Sanity Labs). Licence and copyright are in `LICENSE`.
+
 ## What this is
 
 AEGIS is a static, local-first browser instrument for recording observations and sealing them on the device that runs it. It has 15 routes, no backend, no account, and no vendor key. The runtime is a prebuilt static bundle in `public/assets/`; the repository also contains the Vincen template scaffold in `src/`, which is not part of the AEGIS runtime.
@@ -20,6 +22,15 @@ The app's own `/free` page says "no telemetry" and "Nothing phones home". That s
 - It does not attest to the trustworthiness of the device, browser, operating system, or extensions it runs on. A passing self-test proves only that specific code paths returned specific values in that browser at that moment.
 - It does not provide a recovery service. There is no account, no vendor key, and no server-side copy.
 - It does not make the vendor-hosted copy beacon-free. The vendor-hosted copy injects the beacons listed below; a clean build from this repository does not.
+
+## Reading the first screen
+
+The first screen shows several status lines that look like warnings. Here is what each one means.
+
+- **NEW INSTANCE ON THIS BROWSER.** The app found no identity stored for this browser. That is the normal result on the first visit, on a new device, or in a new browser. Nothing was replaced. Older releases labelled this case "INSTANCE IDENTITY CHANGED", which read as an alarm for no reason.
+- **INSTANCE IDENTITY CHANGED.** The identity stored for this browser no longer matches the key it holds now. This is the one to take seriously. Common causes are cleared browser data, switching browsers, or restoring a backup. Records sealed before the change do not continue the new chain.
+- **NO READING YET** and **NOT SET.** Nothing has been measured yet, and no vault passphrase is set. These are empty states, not failures. Set a passphrase in `/soul` to seal the vault.
+- **FAIL in the session audit.** The audit counts real network calls and third-party origins it can see from the page. The vendor-hosted copy loads an analytics script and sends a beacon, so those rows fail there. A clean build from this repository does not add them. The FAIL lines report what the page can observe. They do not mean the app's own code is broken.
 
 ## Routes
 
