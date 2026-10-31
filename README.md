@@ -36,6 +36,12 @@ The first screen shows several status lines that look like warnings. Here is wha
 
 A separate page at `/monitor/` reads only the device readings you switch on (clock agreement, timer regularity, device status, motion), seals each reading into a SHA-256 hash chain on the device, and shows whether the chain verifies. It can export the log and check an exported file. It works with every switch off. It does not detect monitoring and cannot prove that nobody is monitoring the device. See `docs/MONITOR.md` for the permissions, the scoring layer, what the browser cannot reach, and how to verify a log.
 
+## Android app: AEGIS Monitor
+
+`android-monitor/` is a native Android app that runs the same monitor on the phone. It adds switch-controlled signals that Android exposes: accessibility services, notification access, device administrators, user-installed certificates, VPN and proxy settings, developer options, and whether another app is recording audio or using a camera (counts only, no app names).
+
+It declares no internet permission. Its manifest permits only `ACCESS_NETWORK_STATE`, which lets it ask whether a VPN or proxy is set and does not allow sending anything. `scripts/check-android-privacy.sh` checks the built manifest, the bundled web files and the sources. It cannot prove that no one is monitoring the phone, and it cannot see which app is using the microphone or camera. See `docs/ANDROID.md` for what Android hides, how to install a build from the repository's workflow artifacts, and how to sign and publish a release.
+
 ## Routes
 
 | Route | What it shows |

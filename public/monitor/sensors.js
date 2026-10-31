@@ -26,7 +26,18 @@ export const GROUP_INFO = {
     reads: "Acceleration from the browser's motion sensor, summarised over the last 2 seconds. Only while this page is open.",
     gate: "The browser asks first where it requires it (iPhone, some Android browsers). Your switch too.",
   },
+  signals: {
+    title: "Device signals (Android app only)",
+    reads: "Accessibility services, notification access, device administrators, user-installed certificates, VPN and proxy settings, developer options, and whether another app is recording audio or using a camera. Names and counts only. Nothing about what those apps do.",
+    gate: "Android app only. Your switch. Android shows the settings themselves; this switch never changes them.",
+  },
 };
+
+// The Android app injects `window.AegisNative`. The browser has no such object.
+export function nativeBridge(env = globalThis) {
+  const b = env.AegisNative;
+  return b && typeof b.readSignals === "function" ? b : null;
+}
 
 export function browserCollectors(env = globalThis) {
   const nav = env.navigator || {};
@@ -35,6 +46,24 @@ export function browserCollectors(env = globalThis) {
   const motionBuf = [];
 
   return {
+    signals: {
+      async read() {
+        const bridge = nativeBridge(env);
+        if (!bridge) return { ok: false, reason: "only available in the Android app" };
+        let parsed;
+        try {
+          parsed = JSON.parse(bridge.readSignals());
+        } catch {
+          return { ok: false, reason: "the Android app returned an unreadable reply" };
+        }
+        return { ok: true, metrics: parsed };
+      },
+      openSettings(kind) {
+        const bridge = nativeBridge(env);
+        return bridge && typeof bridge.openSettings === "function" ? bridge.openSettings(kind) : false;
+      },
+    },
+
     clock: {
       async read() {
         return { ok: true, metrics: { wallMs: Date.now(), monoMs: round(performance.now(), 3) } };

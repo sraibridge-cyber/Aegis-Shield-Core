@@ -1,4 +1,13 @@
-# Changelog
+## Android app (AEGIS Monitor), branch feat/aegis-android
+
+### Added
+
+- `android-monitor/` — native Kotlin app (`io.aegis.monitor`). No INTERNET permission. Loads the monitor page from files inside the APK through a local-only WebView, and reads Android settings through a read-only bridge.
+- A `signals` switch in the monitor: accessibility services, notification access, device administrators, user-installed certificates, VPN and proxy, developer options, and audio-recording and camera-busy counts. Off by default, and shown as Android-only in a browser.
+- `signalFlags` (`public/monitor/signals.js`): plain flags for changes between readings. Its tests are in `test/monitor/signals.test.mjs`.
+- `scripts/check-android-privacy.sh` — fails the build on extra permissions, outside addresses in web files, network APIs in Kotlin, or unlisted dependencies.
+- `ci/android-monitor.workflow.yml` — the workflow (runs the tests, builds a debug APK, uploads it as an artifact; creates no Release or tag; manual secret-based signed build). Move it to `.github/workflows/android-monitor.yml` to enable it. See docs/ANDROID.md.
+- `docs/ANDROID.md` — installing from artifacts, signing with your own key, publishing a release yourself.
 
 ## Device monitor (`/monitor/`), branch feat/aegis-device-monitor
 

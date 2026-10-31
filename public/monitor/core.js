@@ -3,9 +3,11 @@
 // for the tests. Every reader is injected through `collectors`.
 
 import { buildRecord, verifyChain, buildExport, FORMAT } from "./chain.js";
+import { signalFlags } from "./signals.js";
 
-export const GROUPS = ["clock", "timing", "vitals", "motion"];
-export const DEFAULT_GRANTS = { clock: false, timing: false, vitals: false, motion: false };
+// `signals` exists only in the Android app (device settings and indicators).
+export const GROUPS = ["clock", "timing", "vitals", "motion", "signals"];
+export const DEFAULT_GRANTS = { clock: false, timing: false, vitals: false, motion: false, signals: false };
 
 // Operator choices for the CC layer. The framework requires tau to be derived
 // from a reference battery; there is none yet, so tau is never set here.
@@ -43,8 +45,26 @@ export function loggedGrants(records) {
 export function createMonitor({ store, collectors, now = () => Date.now(), intervalMs = 30000 }) {
   let grants = { ...DEFAULT_GRANTS };
   let prevClock = null;
+  let lastSignals = undefined; // undefined: not loaded from the chain yet; null: no baseline
   let busy = false;
   let sampleCount = 0;
+
+  // The baseline for signal changes is the last signals reading in the chain,
+  // taken after the most recent time the signals switch was turned on. This
+  // survives a page reload, and it cannot be edited without breaking the chain.
+  async function signalBaseline() {
+    if (lastSignals !== undefined) return lastSignals;
+    let base = null;
+    for (const r of await store.all()) {
+      if (r.type === "CONSENT" && r.payload && r.payload.group === "signals") {
+        if (r.payload.granted !== true) base = null;
+      } else if (r.type === "OBSERVATION" && r.payload && r.payload.readings && r.payload.readings.signals) {
+        base = r.payload.readings.signals;
+      }
+    }
+    lastSignals = base;
+    return base;
+  }
 
   const grantedNow = () => GROUPS.filter((g) => grants[g]);
   const stamp = () => new Date(now()).toISOString();
@@ -89,6 +109,7 @@ export function createMonitor({ store, collectors, now = () => Date.now(), inter
     } else {
       if (collectors[group] && collectors[group].stop) collectors[group].stop();
       if (group === "clock") prevClock = null;
+      if (group === "signals") lastSignals = null;
     }
     await append("CONSENT", `${group} ${want ? "on" : "off"}`, { group, granted: want, method });
     return { changed: true, grants: { ...grants } };
@@ -172,6 +193,12 @@ export function createMonitor({ store, collectors, now = () => Date.now(), inter
             text: `A 200 ms timer fired ${Math.round(readings.timing.lateMs)} ms late.`,
           });
         }
+      }
+
+      if (readings.signals) {
+        const base = await signalBaseline();
+        for (const f of signalFlags(base, readings.signals)) flags.push(f);
+        lastSignals = readings.signals;
       }
 
       const mu = coherence(dims);

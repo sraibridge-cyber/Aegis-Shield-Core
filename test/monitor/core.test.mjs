@@ -57,7 +57,7 @@ function makeEnv() {
 test("with zero permissions, no reader runs and only the start record is written", async () => {
   const { collectors, store, monitor } = makeEnv();
   const grants = await monitor.init();
-  assert.deepEqual(grants, { clock: false, timing: false, vitals: false, motion: false });
+  assert.deepEqual(grants, { clock: false, timing: false, vitals: false, motion: false, signals: false });
   const r = await monitor.sample();
   assert.equal(r.sampled, false);
   assert.equal(r.reason, "no permissions granted");

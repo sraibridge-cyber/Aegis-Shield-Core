@@ -1,7 +1,7 @@
 // AEGIS device monitor: the page. Wires the core to the screen.
 
 import { GROUPS, createMonitor } from "./core.js";
-import { browserCollectors, GROUP_INFO } from "./sensors.js";
+import { browserCollectors, GROUP_INFO, nativeBridge } from "./sensors.js";
 import { MemoryStore, openIdbStore } from "./store.js";
 import { verifyExport } from "./chain.js";
 
@@ -30,6 +30,7 @@ async function openStore() {
 }
 
 function permissionStatus(group, grants) {
+  if (group === "signals" && !nativeBridge()) return { label: "Android app only", tone: "off", disabled: true };
   if (group === "motion") {
     if (typeof globalThis.DeviceMotionEvent === "undefined") return { label: "Not available in this browser", tone: "off", disabled: true };
     if (motionBlocked) return { label: "Browser blocked motion", tone: "warn", disabled: false };
@@ -59,6 +60,22 @@ function renderPermissions(snap) {
   }).join("");
 }
 
+const SETTINGS_LINKS = [
+  ["accessibility", "Accessibility services"],
+  ["notifications", "Notification access"],
+  ["security", "Security (device admins, certificates)"],
+  ["developer", "Developer options"],
+];
+
+function renderSettingsLinks() {
+  return `
+    <section class="card">
+      <h2>Android settings</h2>
+      <p class="muted small">Android owns these settings. Tapping opens the screen where you can review or turn them off. This page never changes them.</p>
+      <div class="actions">${SETTINGS_LINKS.map(([k, label]) => `<button type="button" data-action="open-settings" data-kind="${k}">${esc(label)}</button>`).join("")}</div>
+    </section>`;
+}
+
 function renderReadings(snap) {
   const obs = snap.lastObservation;
   if (!obs) {
@@ -86,6 +103,12 @@ function summariseReading(g, r) {
     const b = typeof r.battery === "object" ? `battery ${Math.round(r.battery.level * 100)}%${r.battery.charging === true ? " charging" : ""}` : "battery not shared";
     const c = typeof r.connection === "object" ? `link ${r.connection.effectiveType ?? "unknown"}` : "link not shared";
     return `${b}; ${c}; ${r.visibility}; ${r.cores} CPU core(s)`;
+  }
+  if (g === "signals") {
+    const count = (v) => (Array.isArray(v) ? `${v.length}` : "not visible to this app");
+    const ca = r.userCaCertificates ? `${r.userCaCertificates.count}` : "not visible";
+    const bool = (v, on, off) => (v === true ? on : v === false ? off : "not visible");
+    return `accessibility ${count(r.accessibilityServices)}; notification access ${count(r.notificationListeners)}; device admins ${count(r.deviceAdmins)}; user certificates ${ca}; VPN ${bool(r.vpnActive, "on", "off")}; proxy ${r.proxy || "none"}; developer options ${bool(r.developerOptions, "on", "off")}; audio recording apps ${r.microphoneRecordingClients ?? "not reported yet"}; cameras busy ${r.camerasInUse ?? "not reported yet"}`;
   }
   return JSON.stringify(r);
 }
@@ -162,6 +185,7 @@ function render(snap) {
       <p class="muted">Every switch starts off. The page works with all of them off. With all of them off it records only changes to the switches.</p>
       ${renderPermissions(snap)}
     </section>
+    ${nativeBridge() ? renderSettingsLinks() : ""}
     <section class="card">
       <h2>What it saw</h2>
       ${renderReadings(snap)}
@@ -251,8 +275,12 @@ function download(name, text) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-async function onAction(action) {
-  if (action === "sample") {
+async function onAction(action, data = {}) {
+  if (action === "open-settings") {
+    const signals = collectors.signals;
+    const ok = signals && signals.openSettings ? signals.openSettings(data.kind) : false;
+    if (!ok) showNotice("This screen can only be opened from the Android app.");
+  } else if (action === "sample") {
     const r = await monitor.sample();
     if (!r.sampled) showNotice(r.reason);
     await refresh();
@@ -303,18 +331,23 @@ function bind() {
   });
   document.addEventListener("click", async (ev) => {
     const b = ev.target.closest && ev.target.closest("button[data-action]");
-    if (b && !b.disabled) await onAction(b.dataset.action);
+    if (b && !b.disabled) await onAction(b.dataset.action, { ...b.dataset });
   });
 }
 
 // Same worker and scope as the AEGIS root, so the page also works offline when
 // it is opened on its own. The worker only caches files this site serves.
 function registerWorker() {
-  if (!("serviceWorker" in navigator)) return;
+  if (nativeBridge() || !("serviceWorker" in navigator)) return;
   navigator.serviceWorker.register("../service-worker.js").catch(() => {});
 }
 
 async function boot() {
+  if (nativeBridge()) {
+    // Inside the Android app there is no AEGIS root to return to.
+    const back = document.getElementById("back-link");
+    if (back) back.remove();
+  }
   registerWorker();
   const store = await openStore();
   monitor = createMonitor({ store, collectors });
