@@ -67,7 +67,9 @@ tasks.named("preBuild") {
 }
 
 dependencies {
-    // The only library: WebView asset loading, so pages are served from inside the APK.
+    // The CSS Labs SDK does the readings, the log and the checks.
+    implementation(project(":csslabs-sdk"))
+    // WebView asset loading, so pages are served from inside the APK.
     implementation("androidx.webkit:webkit:1.11.0")
     testImplementation("junit:junit:4.13.2")
 }

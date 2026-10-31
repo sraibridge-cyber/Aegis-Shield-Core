@@ -47,6 +47,16 @@ export function browserCollectors(env = globalThis) {
 
   return {
     signals: {
+      // Turning the switch on or off also turns the SDK's consent on or off, so
+      // the native log only reads signals the user has allowed.
+      start() {
+        const b = nativeBridge(env);
+        if (b && typeof b.setSignalConsent === "function") b.setSignalConsent(true);
+      },
+      stop() {
+        const b = nativeBridge(env);
+        if (b && typeof b.setSignalConsent === "function") b.setSignalConsent(false);
+      },
       async read() {
         const bridge = nativeBridge(env);
         if (!bridge) return { ok: false, reason: "only available in the Android app" };
@@ -61,6 +71,16 @@ export function browserCollectors(env = globalThis) {
       openSettings(kind) {
         const bridge = nativeBridge(env);
         return bridge && typeof bridge.openSettings === "function" ? bridge.openSettings(kind) : false;
+      },
+      // The native log's own check. Null when the page is not in the Android app.
+      verifyNativeLog() {
+        const bridge = nativeBridge(env);
+        if (!bridge || typeof bridge.verifyNativeLog !== "function") return null;
+        try {
+          return JSON.parse(bridge.verifyNativeLog());
+        } catch {
+          return null;
+        }
       },
     },
 

@@ -20,6 +20,10 @@ The repository already has a Capacitor wrapper for the AEGIS app, but its build 
 | Opt-in only | Every signal group is off until you switch it on. The app works with all switches off. |
 | Local log | The log lives in the app's private storage. Clearing the app's data erases it. |
 
+## The SDK underneath
+
+The log, the signal readers, the consent switches and the export now live in `csslabs-sdk/`, an Android library with its own README and version number (0.1.0). This app is its sample. The SDK has the same promises as the app: one permission (`ACCESS_NETWORK_STATE`), no network dependency, and no data sent off the phone. The scoring interface for the CC and SS layer is a placeholder. No mapping from device signals onto the framework's dimensions exists yet, so the app shows no score.
+
 ## The signals, and what Android allows
 
 Each switch is on the page. None of them requests a runtime permission, because Android does not offer one for these settings. Your switch is the only gate.

@@ -166,6 +166,17 @@ function renderChain(snap) {
     <div id="verify-result"></div>`;
 }
 
+// In the Android app, the SDK keeps its own chain. Its status is shown here.
+function renderNativeLog() {
+  const c = collectors.signals;
+  const v = c && c.verifyNativeLog ? c.verifyNativeLog() : null;
+  if (!v) return "";
+  const line = v.ok
+    ? `<div class="chain ok">NATIVE LOG VERIFIES: ${esc(v.count)} record${v.count === 1 ? "" : "s"}</div>`
+    : `<div class="chain bad">NATIVE LOG BROKEN: ${esc(v.reason || "unknown")}</div>`;
+  return `<h3>Android log</h3>${line}<p class="muted small">This is the app's own log, kept in its private storage. It is separate from the log in this page.</p>`;
+}
+
 function renderLog(snap) {
   const rows = snap.records.slice(-15).reverse();
   if (!rows.length) return `<p class="muted">Nothing recorded yet.</p>`;
@@ -202,6 +213,7 @@ function render(snap) {
     <section class="card">
       <h2>Sealed log</h2>
       ${renderChain(snap)}
+      ${renderNativeLog()}
       <h3>Latest entries</h3>
       ${renderLog(snap)}
     </section>

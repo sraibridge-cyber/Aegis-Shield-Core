@@ -74,6 +74,29 @@ while IFS= read -r line; do
 done <<< "$DEPS"
 say "dependencies: $(echo "$DEPS" | sed 's/.*("//; s/").*//' | tr '\n' ' ')"
 
+# 5. The SDK (csslabs-sdk): its source manifest, its sources, its dependencies.
+SDK="$ROOT/csslabs-sdk"
+if [ -d "$SDK" ]; then
+  SDK_MANIFEST="$SDK/src/main/AndroidManifest.xml"
+  for p in $(grep -o 'uses-permission[^>]*android:name="[^"]*"' "$SDK_MANIFEST" | sed 's/.*android:name="\([^"]*\)".*/\1/'); do
+    if [[ "$ALLOWED" != *" $p "* ]]; then bad "SDK manifest declares $p"; fi
+  done
+  if grep -q 'android.permission.INTERNET' "$SDK_MANIFEST"; then bad "SDK manifest declares INTERNET"; fi
+  if grep -RInE "$NET" "$SDK/src/main/java" >/dev/null 2>&1; then
+    bad "SDK sources use a network or analytics API:"
+    grep -RInE "$NET" "$SDK/src/main/java" | head -n 10
+  else
+    say "SDK sources: no network, socket or analytics APIs"
+  fi
+  SDK_DEPS="$(grep -E '^\s*(implementation|api|runtimeOnly|compileOnly)\(' "$SDK/build.gradle.kts" | sed 's/^ *//' || true)"
+  if [ -n "$SDK_DEPS" ]; then bad "SDK declares runtime dependencies: $SDK_DEPS"; fi
+  if grep -RInE 'https?://' "$SDK/src/main/java" >/dev/null 2>&1; then
+    bad "SDK sources reference an outside address"
+  else
+    say "SDK sources: no http(s) addresses"
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "privacy checks: FAILED"
   exit 1

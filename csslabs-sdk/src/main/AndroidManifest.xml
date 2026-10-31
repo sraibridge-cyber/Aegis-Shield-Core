@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+      The SDK declares no INTERNET permission and no other network permission.
+      ACCESS_NETWORK_STATE lets it ask whether a VPN or proxy is set. It does not
+      allow sending anything. scripts/check-android-privacy.sh checks this in CI.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+</manifest>

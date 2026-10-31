@@ -1,3 +1,21 @@
+## CSS Labs Android SDK 0.1.0, branch feat/css-android-sdk
+
+### Added
+
+- `csslabs-sdk/` — an Android library (AAR) holding the reusable monitor parts: the SHA-256 hash-chained append-only log with verification and export, opt-in device-signal readers (accessibility services, notification access, device administrators, user certificates, VPN and proxy, developer options, audio-recording and camera-busy counts), a consent layer where everything starts off and can be revoked, and a `CoherenceScorer` interface for the CC and SS layer.
+- The CC and SS scorer ships as an interface with no mapping onto device signals and no threshold. `NoScorer` computes nothing, and any value a scorer produces is marked uncalibrated.
+- Unit tests for the chain, including tamper detection, the file store, signal change flags, consent, and the scoring formula.
+- The AAR build in `ci/android-monitor.workflow.yml` builds the SDK and uploads it as an artifact.
+- `scripts/check-android-privacy.sh` checks the SDK manifest, its sources for network APIs, and its dependencies for anything outside address or analytics code.
+
+### Changed
+
+- `android-monitor/` now uses the SDK. Its own signal and log code moved into the library.
+
+### Not included
+
+- No package-registry publishing and no public release.
+
 ## Android app (AEGIS Monitor), branch feat/aegis-android
 
 ### Added

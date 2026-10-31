@@ -16,3 +16,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "aegis-monitor"
 include(":app")
+include(":csslabs-sdk")
+// The SDK lives in the repository root, next to the monitor page.
+project(":csslabs-sdk").projectDir = file("../csslabs-sdk")

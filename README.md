@@ -40,7 +40,13 @@ A separate page at `/monitor/` reads only the device readings you switch on (clo
 
 `android-monitor/` is a native Android app that runs the same monitor on the phone. It adds switch-controlled signals that Android exposes: accessibility services, notification access, device administrators, user-installed certificates, VPN and proxy settings, developer options, and whether another app is recording audio or using a camera (counts only, no app names).
 
+The app is built on the CSS Labs Android SDK (`csslabs-sdk/`), a reusable library with the same hash-chained log, the device-signal readers, the consent layer and a scoring interface for the CC and SS framework. See `csslabs-sdk/README.md`.
+
 It declares no internet permission. Its manifest permits only `ACCESS_NETWORK_STATE`, which lets it ask whether a VPN or proxy is set and does not allow sending anything. `scripts/check-android-privacy.sh` checks the built manifest, the bundled web files and the sources. It cannot prove that no one is monitoring the phone, and it cannot see which app is using the microphone or camera. See `docs/ANDROID.md` for what Android hides, how to install a build from the repository's workflow artifacts, and how to sign and publish a release.
+
+## CSS Labs Android SDK
+
+The on-device monitor logic now lives in a library module, `csslabs-sdk/` (version 0.1.0). AEGIS Monitor is its sample app. The SDK keeps the same promise: its manifest declares only `ACCESS_NETWORK_STATE`, it has no network dependency, and it sends nothing off the phone. See `csslabs-sdk/README.md` for the API and a 10-line example.
 
 ## Routes
 
