@@ -32,6 +32,10 @@ The first screen shows several status lines that look like warnings. Here is wha
 - **NO READING YET** and **NOT SET.** Nothing has been measured yet, and no vault passphrase is set. These are empty states, not failures. Set a passphrase in `/soul` to seal the vault.
 - **FAIL in the session audit.** The audit counts real network calls and third-party origins it can see from the page. The vendor-hosted copy loads an analytics script and sends a beacon, so those rows fail there. A clean build from this repository does not add them. The FAIL lines report what the page can observe. They do not mean the app's own code is broken.
 
+## Device monitor (`/monitor/`)
+
+A separate page at `/monitor/` reads only the device readings you switch on (clock agreement, timer regularity, device status, motion), seals each reading into a SHA-256 hash chain on the device, and shows whether the chain verifies. It can export the log and check an exported file. It works with every switch off. It does not detect monitoring and cannot prove that nobody is monitoring the device. See `docs/MONITOR.md` for the permissions, the scoring layer, what the browser cannot reach, and how to verify a log.
+
 ## Routes
 
 | Route | What it shows |

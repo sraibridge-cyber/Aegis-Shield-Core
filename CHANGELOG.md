@@ -1,5 +1,23 @@
 # Changelog
 
+## Device monitor (`/monitor/`), branch feat/aegis-device-monitor
+
+### Added
+
+- `public/monitor/` — a separate static page: permission switches for clock agreement, timer regularity, device status and motion (all off by default); hash-chained, append-only local log with a verifier; export and file check; a consistency index μ (uncalibrated) and rule and gate status.
+- `test/monitor/` — Node tests for the hash chain (tamper, deletion, reorder, truncation, full rewrite) and for consent, gating and two-tab writes. Run with `npm test`.
+- `docs/MONITOR.md` — permissions, scoring layer, limits, and how to verify a log by hand.
+
+### Changed
+
+- `public/service-worker.js` — precache list includes the monitor files; monitor navigations are served the monitor page; cache version bumped to `monitor-1`.
+- `package.json` — adds the `test` script.
+- `README.md` — short section pointing to the monitor page.
+
+### Not changed
+
+- The shipped AEGIS bundle, the public key, the receipts, the ledger, and the main AEGIS routes.
+
 ## 2026-10-26 — Segment 3: Hull Access native capability bridge
 
 **STATUS: written, not compiled.** No JVM, Gradle, Android SDK, or device was used. The `HullTelemetry` Java plugin has not been compiled or run.

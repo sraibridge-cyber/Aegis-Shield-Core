@@ -1,8 +1,9 @@
 /* AEGIS 44 service worker — generated at build time */
-const VERSION = "ble-1";
+const VERSION = "monitor-1";
 const CACHE = "aegis44-" + VERSION;
-const PRECACHE = ["./","./assets/clock-sWdOvu5h.js","./assets/download-GqGer48n.js","./assets/fade-in-D70zKjr9.js","./assets/free-B5aUqako.js","./assets/gauge-cziwSQul.js","./assets/index-CL6IUdNY.js","./assets/index-VLdJOqoS.css","./assets/index-wHtT6qdu.js","./assets/install-BcBqnI2t.js","./assets/install-CmYWRgZ4.js","./assets/layer-stack-Dv5SLYdk.js","./assets/memory-BFUxe0H2.js","./assets/mind-BTRhqqfo.js","./assets/nerve-JbMXvKD5.js","./assets/backup-9f3c2a.js","./assets/ble-9f3c2a.js","./assets/ble-panel-9f3c2a.js","./assets/identity-9f3c2a.js","./assets/instance-9f3c2a.js","./assets/persist-9f3c2a.js","./assets/recovery-9f3c2a.js","./assets/guide-9f3c2a.js","./assets/guide-content-9f3c2a.js","./assets/rank-9f3c2a.js","./assets/selftest-4a7c1e.js","./assets/soul-DJ_k70Fw.js","./assets/verify-KPAhcwj-.js","./assets/wiring-P1LhyUQl.js","./icons/apple-touch-icon.png","./icons/icon-192.png","./icons/icon-512.png","./icons/icon-maskable-512.png","./icons/mark.svg","./index.html","./manifest.json"];
+const PRECACHE = ["./","./monitor/","./monitor/index.html","./monitor/monitor.css","./monitor/app.js","./monitor/core.js","./monitor/chain.js","./monitor/store.js","./monitor/sensors.js","./assets/clock-sWdOvu5h.js","./assets/download-GqGer48n.js","./assets/fade-in-D70zKjr9.js","./assets/free-B5aUqako.js","./assets/gauge-cziwSQul.js","./assets/index-CL6IUdNY.js","./assets/index-VLdJOqoS.css","./assets/index-wHtT6qdu.js","./assets/install-BcBqnI2t.js","./assets/install-CmYWRgZ4.js","./assets/layer-stack-Dv5SLYdk.js","./assets/memory-BFUxe0H2.js","./assets/mind-BTRhqqfo.js","./assets/nerve-JbMXvKD5.js","./assets/backup-9f3c2a.js","./assets/ble-9f3c2a.js","./assets/ble-panel-9f3c2a.js","./assets/identity-9f3c2a.js","./assets/instance-9f3c2a.js","./assets/persist-9f3c2a.js","./assets/recovery-9f3c2a.js","./assets/guide-9f3c2a.js","./assets/guide-content-9f3c2a.js","./assets/rank-9f3c2a.js","./assets/selftest-4a7c1e.js","./assets/soul-DJ_k70Fw.js","./assets/verify-KPAhcwj-.js","./assets/wiring-P1LhyUQl.js","./icons/apple-touch-icon.png","./icons/icon-192.png","./icons/icon-512.png","./icons/icon-maskable-512.png","./icons/mark.svg","./index.html","./manifest.json"];
 const INDEX = new URL("./index.html", self.registration.scope).href;
+const MONITOR = new URL("./monitor/index.html", self.registration.scope).href;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -25,8 +26,10 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
 
   if (req.mode === "navigate") {
+    const monitor = /\/monitor(\/index\.html)?\/?$/.test(url.pathname);
+    const target = monitor ? MONITOR : INDEX;
     event.respondWith(
-      caches.match(INDEX).then((hit) => hit || fetch(req).catch(() => caches.match(INDEX)))
+      caches.match(target).then((hit) => hit || fetch(req).catch(() => caches.match(target)))
     );
     return;
   }

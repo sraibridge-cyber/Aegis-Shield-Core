@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Device monitor · AEGIS 44</title>
+    <meta name="description" content="Device monitor for AEGIS 44. Reads only the sensors you switch on, seals each reading into a local hash chain, and shows whether the chain verifies." />
+    <meta name="theme-color" content="#06080a" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="stylesheet" href="./monitor.css" />
+    <script>
+      // /monitor (no trailing slash) would resolve ./ assets one level too high.
+      if (/\/monitor$/.test(location.pathname)) location.replace(location.pathname + "/" + location.search + location.hash);
+    </script>
+  </head>
+  <body>
+    <header class="top">
+      <a class="back" href="../">← AEGIS 44</a>
+      <h1>Device monitor</h1>
+      <p class="lede">
+        This page reads only the sensors you switch on. Each reading is sealed into a SHA-256 hash chain on this device,
+        so any later edit or deletion breaks the chain. The chain can show that the log was changed. It cannot show
+        that nobody is monitoring this device.
+      </p>
+    </header>
+    <main id="app">
+      <section class="card"><p class="muted">Loading…</p></section>
+    </main>
+    <div id="global-notice" class="global-notice" role="status" aria-live="polite"></div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
