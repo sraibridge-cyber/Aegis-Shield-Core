@@ -1,0 +1,88 @@
+name: AEGIS Monitor debug APK (feat branches)
+
+# Builds the AEGIS Monitor DEBUG APK and the CSS Labs Android SDK AAR, runs the unit
+# tests, checks that the built manifests declare no INTERNET permission, and uploads
+# the results as WORKFLOW ARTIFACTS. It publishes nothing: no release, no tag, no
+# package. It only runs on feat/ branches and by manual dispatch. The existing
+# main-branch pipeline (build-apk.yml) is separate and is not touched by this file.
+
+on:
+  push:
+    branches: [ 'feat/**' ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Monitor web tests (hash chain, consent, signal changes)
+        run: node --test test/monitor/*.test.mjs
+
+  android-debug:
+    runs-on: ubuntu-latest
+    needs: web-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install SDK packages
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Unit tests (SDK and app), debug APK, and SDK AAR
+        run: gradle -p android-monitor :csslabs-sdk:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug :csslabs-sdk:assembleRelease --no-daemon
+      - name: Privacy checks (manifest, web files, sources, dependencies)
+        run: bash scripts/check-android-privacy.sh
+      - name: Check the built manifests declare no INTERNET permission
+        run: |
+          set -euo pipefail
+          AAPT2="$ANDROID_HOME/build-tools/34.0.0/aapt2"
+          APK=android-monitor/app/build/outputs/apk/debug/app-debug.apk
+          AAR=csslabs-sdk/build/outputs/aar/csslabs-sdk-release.aar
+          test -f "$APK"
+          test -f "$AAR"
+          test -x "$AAPT2"
+          "$AAPT2" dump permissions "$APK" | tee apk-permissions.txt
+          unzip -p "$AAR" AndroidManifest.xml > aar-AndroidManifest.xml
+          cat aar-AndroidManifest.xml
+          for f in apk-permissions.txt aar-AndroidManifest.xml; do
+            if grep -q 'android.permission.INTERNET' "$f"; then
+              echo "::error::android.permission.INTERNET is declared in $f"
+              exit 1
+            fi
+          done
+          echo "PASS: neither the APK manifest nor the AAR manifest declares INTERNET"
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd android-monitor/app/build/outputs/apk/debug
+          sha256sum app-debug.apk | tee app-debug.apk.sha256
+          cd "$GITHUB_WORKSPACE/csslabs-sdk/build/outputs/aar"
+          sha256sum csslabs-sdk-release.aar | tee csslabs-sdk-release.aar.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aegis-monitor-debug-apk
+          path: |
+            android-monitor/app/build/outputs/apk/debug/app-debug.apk
+            android-monitor/app/build/outputs/apk/debug/app-debug.apk.sha256
+            apk-permissions.txt
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: csslabs-sdk-aar
+          path: |
+            csslabs-sdk/build/outputs/aar/csslabs-sdk-release.aar
+            csslabs-sdk/build/outputs/aar/csslabs-sdk-release.aar.sha256
+            aar-AndroidManifest.xml
+          retention-days: 30
