@@ -11,7 +11,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
-        android:label="AEGIS Monitor"
+        android:label="SIMM"
         android:icon="@android:drawable/sym_def_app_icon"
         android:allowBackup="false"
         android:usesCleartextTraffic="false"

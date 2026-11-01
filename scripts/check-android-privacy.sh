@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Checks the built AEGIS Monitor app against its privacy promises. Run after a
+# Checks the built SIMM app against its privacy promises. Run after a
 # Gradle build from the repository root:
 #   bash scripts/check-android-privacy.sh
 #

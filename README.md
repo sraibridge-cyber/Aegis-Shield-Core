@@ -36,7 +36,7 @@ The first screen shows several status lines that look like warnings. Here is wha
 
 A separate page at `/monitor/` reads only the device readings you switch on (clock agreement, timer regularity, device status, motion), seals each reading into a SHA-256 hash chain on the device, and shows whether the chain verifies. It can export the log and check an exported file. It works with every switch off. It does not detect monitoring and cannot prove that nobody is monitoring the device. See `docs/MONITOR.md` for the permissions, the scoring layer, what the browser cannot reach, and how to verify a log.
 
-## Android app: AEGIS Monitor
+## Android app: SIMM (System Information Metrics Monitor)
 
 `android-monitor/` is a native Android app that runs the same monitor on the phone. It adds switch-controlled signals that Android exposes: accessibility services, notification access, device administrators, user-installed certificates, VPN and proxy settings, developer options, and whether another app is recording audio or using a camera (counts only, no app names).
 
@@ -46,7 +46,7 @@ It declares no internet permission. Its manifest permits only `ACCESS_NETWORK_ST
 
 ## CSS Labs Android SDK
 
-The on-device monitor logic now lives in a library module, `csslabs-sdk/` (version 0.1.0). AEGIS Monitor is its sample app. The SDK keeps the same promise: its manifest declares only `ACCESS_NETWORK_STATE`, it has no network dependency, and it sends nothing off the phone. See `csslabs-sdk/README.md` for the API and a 10-line example.
+The on-device monitor logic now lives in a library module, `csslabs-sdk/` (version 0.1.0). SIMM is its sample app. The SDK keeps the same promise: its manifest declares only `ACCESS_NETWORK_STATE`, it has no network dependency, and it sends nothing off the phone. See `csslabs-sdk/README.md` for the API and a 10-line example.
 
 ## Routes
 

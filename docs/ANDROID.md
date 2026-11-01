@@ -1,4 +1,4 @@
-# AEGIS Monitor for Android
+# SIMM (System Information Metrics Monitor) for Android
 
 A separate Android app that runs the device monitor on the phone itself. It reads only the signals you switch on, writes each reading into the same SHA-256 hash-chained local log as the web page, and can export and check that log on the device.
 

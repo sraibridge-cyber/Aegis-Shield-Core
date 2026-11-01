@@ -16,7 +16,7 @@
 
 - No package-registry publishing and no public release.
 
-## Android app (AEGIS Monitor), branch feat/aegis-android
+## Android app (SIMM, formerly AEGIS Monitor), branch feat/aegis-android
 
 ### Added
 
