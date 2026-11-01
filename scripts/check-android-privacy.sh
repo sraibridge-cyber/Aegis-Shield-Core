@@ -89,6 +89,7 @@ done <<< "$DEPS"
 say "dependencies: $(echo "$DEPS" | sed 's/.*("//; s/").*//' | tr '\n' ' ')"
 
 # 5. The SDK (csslabs-sdk): its source manifest, its sources, its dependencies.
+ALLOWED=" android.permission.ACCESS_NETWORK_STATE "
 SDK="$ROOT/csslabs-sdk"
 if [ -d "$SDK" ]; then
   SDK_MANIFEST="$SDK/src/main/AndroidManifest.xml"
