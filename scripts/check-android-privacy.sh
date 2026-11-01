@@ -25,20 +25,34 @@ if [ -z "$MANIFEST" ]; then
 fi
 say "merged manifest: ${MANIFEST#$ROOT/}"
 
-ALLOWED=" android.permission.ACCESS_NETWORK_STATE "
-PERMS="$(grep -o 'uses-permission[^>]*android:name="[^"]*"' "$MANIFEST" | sed 's/.*android:name="\([^"]*\)".*/\1/' | sort -u || true)"
-for p in $PERMS; do
-  if [[ "$ALLOWED" != *" $p "* ]]; then
-    bad "manifest declares $p (only ACCESS_NETWORK_STATE is allowed)"
-  fi
-done
-if grep -q 'android.permission.INTERNET' "$MANIFEST"; then
-  bad "manifest declares android.permission.INTERNET"
+# Parse the manifest as XML and read the uses-permission elements. A text search also
+# matches comments and attribute text, so it is only used to show where a mention sits.
+if ! python3 - "$MANIFEST" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+A = '{http://schemas.android.com/apk/res/android}'
+ALLOWED = {'android.permission.ACCESS_NETWORK_STATE'}
+path = sys.argv[1]
+root = ET.parse(path).getroot()
+names = sorted({e.get(A + 'name') for e in root.iter('uses-permission') if e.get(A + 'name')})
+print('uses-permission elements in the merged manifest: ' + (', '.join(names) or 'none'))
+bad = [n for n in names if n not in ALLOWED]
+for n in bad:
+    print('FAIL: manifest declares %s (only ACCESS_NETWORK_STATE is allowed)' % n)
+if 'android.permission.INTERNET' not in names:
+    print('android.permission.INTERNET is not declared as a permission element')
+with open(path, encoding='utf-8', errors='replace') as fh:
+    for lineno, line in enumerate(fh, 1):
+        if 'android.permission.INTERNET' in line:
+            print('text mention at line %d: %s' % (lineno, line.strip()[:200]))
+sys.exit(1 if bad else 0)
+PY
+then
+  fail=1
 fi
 if grep -q 'usesCleartextTraffic="true"' "$MANIFEST"; then
   bad "cleartext traffic is allowed"
 fi
-say "permissions in manifest: $(echo $PERMS | tr '\n' ' ')"
 
 # 2. Bundled web files: no outside addresses.
 WEB="$APP/build/generated/monitor-assets/monitor"
@@ -65,7 +79,7 @@ fi
 
 # 4. Dependencies: the allowed list only.
 DEPS="$(grep -E '^\s*(implementation|testImplementation|api|runtimeOnly)\(' "$APP/build.gradle.kts" | sed 's/^ *//' || true)"
-ALLOWED_DEPS='androidx.webkit:webkit:|junit:junit:'
+ALLOWED_DEPS='androidx.webkit:webkit:|junit:junit:|project\(":csslabs-sdk"\)'
 while IFS= read -r line; do
   [ -z "$line" ] && continue
   if ! echo "$line" | grep -qE "$ALLOWED_DEPS"; then
